@@ -1,0 +1,91 @@
+---
+- name: Deploy Tailscale Subnet Router and Harden Firewall
+  hosts: docker_swarm
+  become: true
+  vars_files:
+    - env.yml
+
+  tasks:
+    - name: Enable IPv4 forwarding in the kernel
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: true
+        state: present
+        reload: true
+
+    - name: Install UFW
+      ansible.builtin.apt:
+        name: ufw
+        state: present
+
+    - name: UFW - Allow SSH from local network
+      community.general.ufw:
+        rule: allow
+        src: 192.168.1.0/24
+        port: '22'
+        proto: tcp
+
+    - name: UFW - Allow SSH from Tailscale
+      community.general.ufw:
+        rule: allow
+        interface: tailscale0
+        direction: in
+        port: '22'
+        proto: tcp
+
+    - name: UFW - Allow all traffic from Tailscale interface
+      community.general.ufw:
+        rule: allow
+        interface: tailscale0
+        direction: in
+
+    - name: UFW - Allow routing from Tailscale to local network
+      community.general.ufw:
+        rule: allow
+        route: true
+        direction: in
+        interface: tailscale0
+        dest: 192.168.1.0/24
+
+    - name: UFW - Allow Portainer UI from local network
+      community.general.ufw:
+        rule: allow
+        src: 192.168.1.0/24
+        port: '9443'
+        proto: tcp
+        direction: in
+
+    - name: UFW - Enable firewall and set default deny
+      community.general.ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+    - name: Create Tailscale state directory
+      ansible.builtin.file:
+        path: /var/lib/tailscale_state
+        state: directory
+        mode: '0755'
+
+    - name: Start Tailscale container
+      community.docker.docker_container:
+        name: tailscale
+        image: tailscale/tailscale:latest
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        capabilities:
+          - NET_ADMIN
+          - NET_RAW
+        devices:
+          - /dev/net/tun:/dev/net/tun
+        volumes:
+          - /var/lib/tailscale_state:/var/lib/tailscale
+        env:
+          TS_AUTHKEY: "{{ ts_key }}"
+          TS_STATE_DIR: "/var/lib/tailscale"
+          TS_HOSTNAME: "docker-mothership"
+          TS_ROUTES: "192.168.1.0/24"
+          TS_USERSPACE: "false"
+          TS_EXTRA_ARGS: "--advertise-tags=tag:container"

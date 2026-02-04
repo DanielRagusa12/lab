@@ -1,0 +1,23 @@
+---
+- name: Deploy Portainer Dashboard
+  hosts: docker_swarm
+  become: true
+
+  tasks:
+    - name: Create Portainer data volume
+      ansible.builtin.file:
+        path: /var/lib/portainer_data
+        state: directory
+        mode: '0755'
+
+    - name: Start Portainer container
+      community.docker.docker_container:
+        name: portainer
+        image: portainer/portainer-ce:latest
+        state: started
+        restart_policy: unless-stopped
+        ports:
+          - "9443:9443"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /var/lib/portainer_data:/data
