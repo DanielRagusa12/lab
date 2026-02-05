@@ -151,6 +151,7 @@ resource "proxmox_virtual_environment_container" "vpn_gateway" {
 
   features {
     nesting = true
+    keyctl = true
   }
 
   device_passthrough {
