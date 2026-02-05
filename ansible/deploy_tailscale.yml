@@ -1,6 +1,6 @@
 ---
-- name: Deploy Tailscale Subnet Router and Harden Firewall
-  hosts: docker_swarm
+- name: Deploy Tailscale Native Subnet Router and Harden Firewall
+  hosts: tailscale_lxc
   become: true
   vars_files:
     - env.yml
@@ -14,23 +14,44 @@
         state: present
         reload: true
 
-    - name: Install UFW
+    - name: Install dependencies
       ansible.builtin.apt:
-        name: ufw
+        name:
+          - apt-transport-https
+          - curl
+          - ufw
         state: present
+        update_cache: true
 
+    - name: Create keyring directory
+      ansible.builtin.file:
+        path: /usr/share/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Tailscale GPG key
+      ansible.builtin.get_url:
+        url: https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
+        dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        mode: '0644'
+
+    - name: Add Tailscale repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main"
+        state: present
+        filename: tailscale
+
+    - name: Install Tailscale
+      ansible.builtin.apt:
+        name: tailscale
+        state: present
+        update_cache: true
+
+    # --- FIREWALL HARDENING ---
     - name: UFW - Allow SSH from local network
       community.general.ufw:
         rule: allow
         src: 192.168.1.0/24
-        port: '22'
-        proto: tcp
-
-    - name: UFW - Allow SSH from Tailscale
-      community.general.ufw:
-        rule: allow
-        interface: tailscale0
-        direction: in
         port: '22'
         proto: tcp
 
@@ -48,46 +69,26 @@
         interface: tailscale0
         dest: 192.168.1.0/24
 
-    - name: UFW - Allow Portainer UI from local network
-      community.general.ufw:
-        rule: allow
-        src: 192.168.1.0/24
-        port: '9443'
-        proto: tcp
-        direction: in
-
     - name: UFW - Enable firewall and set default deny
       community.general.ufw:
         state: enabled
         policy: deny
         direction: incoming
 
-    - name: Create Tailscale state directory
-      ansible.builtin.file:
-        path: /var/lib/tailscale_state
-        state: directory
-        mode: '0700'
-        owner: root
-        group: root
+    - name: Check Tailscale login status
+      ansible.builtin.command: tailscale status --json
+      register: ts_status
+      failed_when: false
+      changed_when: false
 
-    - name: Start Tailscale container
-      community.docker.docker_container:
-        name: tailscale
-        image: tailscale/tailscale:latest
-        state: started
-        restart_policy: unless-stopped
-        network_mode: host
-        capabilities:
-          - NET_ADMIN
-          - NET_RAW
-        devices:
-          - /dev/net/tun:/dev/net/tun
-        volumes:
-          - /var/lib/tailscale_state:/var/lib/tailscale
-        env:
-          TS_AUTHKEY: "{{ ts_key }}"
-          TS_STATE_DIR: "/var/lib/tailscale"
-          TS_HOSTNAME: "docker-mothership"
-          TS_ROUTES: "192.168.1.0/24"
-          TS_USERSPACE: "false"
-          TS_EXTRA_ARGS: "--advertise-tags=tag:container"
+    - name: Bring Tailscale Up
+      ansible.builtin.command:
+        cmd: >
+          tailscale up
+          --reset
+          --authkey={{ ts_key }}
+          --hostname="lxc-subnet-router"
+          --advertise-routes="192.168.1.0/24"
+          --accept-dns=false
+      when: "'Running' not in (ts_status.stdout | from_json).BackendState"
+      changed_when: true

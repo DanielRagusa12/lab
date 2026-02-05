@@ -1,6 +1,6 @@
 ---
 - name: Install Docker on Ubuntu
-  hosts: docker_swarm
+  hosts: microservice-host
   become: true
   tasks:
     - name: Update apt cache and install dependencies

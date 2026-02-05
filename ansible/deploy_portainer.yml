@@ -1,6 +1,6 @@
 ---
 - name: Deploy Portainer Dashboard
-  hosts: docker_swarm
+  hosts: microservice-host
   become: true
 
   tasks:
