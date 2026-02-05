@@ -1,0 +1,43 @@
+---
+- name: Production Deployment - Discord Music Bot
+  hosts: microservice-host
+  become: true
+  vars_files:
+    - env.yml
+
+  vars:
+    remote_bot_path: "/opt/music-bot"
+    local_code_path: "{{ local_bot_root }}"
+
+  tasks:
+    - name: Ship code from local machine to VM
+      ansible.posix.synchronize:
+        src: "{{ local_code_path }}"
+        dest: "{{ remote_bot_path }}"
+        delete: true
+        recursive: true
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=.env"
+          - "--exclude=*.yml"
+
+    - name: Build the Docker image
+      community.docker.docker_image:
+        name: music-bot-prod
+        build:
+          path: "{{ remote_bot_path }}"
+        source: build
+        state: present
+        force_source: true
+
+    - name: Launch/Restart the container
+      community.docker.docker_container:
+        name: discord-music-bot
+        image: music-bot-prod:latest
+        state: started
+        restart: true
+        restart_policy: unless-stopped
+        env:
+          DISCORD_BOT_TOKEN: "{{ discord_token }}"
+        devices:
+          - "/dev/snd:/dev/snd"
