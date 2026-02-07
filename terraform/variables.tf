@@ -74,3 +74,33 @@ variable "tunnel_lxc_password" {
   type        = string
   sensitive   = true
 }
+
+variable "playit_lxc_ipv4_address" {
+  description = "IP address for the Playit.gg LXC (CIDR)"
+  type        = string
+}
+
+variable "playit_lxc_password" {
+  description = "Root password for the Playit LXC container"
+  type        = string
+  sensitive   = true
+}
+
+variable "nginx_lxc_ipv4_address" {
+  description = "IP address for the NGINX Reverse Proxy LXC (CIDR)"
+  type        = string
+}
+
+variable "nginx_lxc_password" {
+  description = "Root password for the NGINX LXC container"
+  type        = string
+  sensitive   = true
+}
+
+# =============================================================================
+# NODES
+# =============================================================================
+variable "workstation_ipv4_address" {
+  description = "local IP of management workstation (CIDR format)"
+  type        = string
+}

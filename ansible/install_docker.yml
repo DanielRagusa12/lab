@@ -1,6 +1,6 @@
 ---
-- name: Install Docker on Ubuntu
-  hosts: microservice-host
+- name: Install Docker on Workload VMs
+  hosts: workloads
   become: true
   tasks:
     - name: Update apt cache and install dependencies
@@ -20,18 +20,25 @@
 
     - name: Download Docker's official GPG key
       ansible.builtin.get_url:
-        url: https://download.docker.com/linux/ubuntu/gpg
+        # FIXED: Use ansible_facts['distribution'] instead of ansible_distribution
+        url: "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}/gpg"
         dest: /etc/apt/keyrings/docker.asc
         mode: '0644'
         force: true
 
     - name: Add Docker repository to Apt sources
-      ansible.builtin.shell: |
-        set -o pipefail
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-        $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-        tee /etc/apt/sources.list.d/docker.list > /dev/null
-      args:
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          ARCH=$(dpkg --print-architecture)
+          # FIXED: Use ansible_facts['distribution']
+          OS_DIST="{{ ansible_facts['distribution'] | lower }}"
+          OS_VER=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          KEY="/etc/apt/keyrings/docker.asc"
+          REPO="https://download.docker.com/linux/$OS_DIST"
+
+          ENTRY="deb [arch=$ARCH signed-by=$KEY] $REPO $OS_VER stable"
+          echo "$ENTRY" | tee /etc/apt/sources.list.d/docker.list > /dev/null
         creates: /etc/apt/sources.list.d/docker.list
         executable: /bin/bash
 
@@ -46,9 +53,9 @@
           - docker-compose-plugin
         state: present
 
-    - name: Add 'ubuntu' user to docker group
+    - name: Add current user to docker group
       ansible.builtin.user:
-        name: ubuntu
+        name: "{{ ansible_user }}"
         groups: docker
         append: true
 

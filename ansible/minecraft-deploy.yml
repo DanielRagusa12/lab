@@ -1,0 +1,62 @@
+---
+- name: Deploy Minecraft Server
+  hosts: game_server
+  become: true
+  vars:
+    mc_root_dir: "/home/{{ ansible_user }}/minecraft"
+    local_files_path: "~/server-golden-image/TwizzySrv"
+
+  tasks:
+    - name: Ensure rsync is installed on the target VM
+      ansible.builtin.apt:
+        name: rsync
+        state: present
+
+    - name: Create Minecraft and data directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+      loop:
+        - "{{ mc_root_dir }}"
+        - "{{ mc_root_dir }}/data"
+
+    - name: Sync mods folder to server
+      ansible.posix.synchronize:
+        src: "{{ local_files_path }}/mods/"
+        dest: "{{ mc_root_dir }}/data/mods"
+        archive: true
+        compress: true
+        delete: true
+        rsync_opts:
+          - "-e 'ssh -i ~/.ssh/proxmox -o StrictHostKeyChecking=no'"
+
+    - name: Sync server.properties file
+      ansible.posix.synchronize:
+        src: "{{ local_files_path }}/server.properties"
+        dest: "{{ mc_root_dir }}/data/server.properties"
+        rsync_opts:
+          - "-e 'ssh -i ~/.ssh/proxmox -o StrictHostKeyChecking=no'"
+
+    - name: Fix permissions on data directory for Docker
+      ansible.builtin.file:
+        path: "{{ mc_root_dir }}/data"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        recurse: true
+
+    - name: Deploy Docker Compose file from template
+      ansible.builtin.template:
+        src: templates/minecraft-compose.yml.j2
+        dest: "{{ mc_root_dir }}/docker-compose.yml"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Start Minecraft via Docker Compose
+      community.docker.docker_compose_v2:
+        project_src: "{{ mc_root_dir }}"
+        state: present
+        wait: true

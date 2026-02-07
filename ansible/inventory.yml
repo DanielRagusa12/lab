@@ -1,0 +1,28 @@
+all:
+  children:
+    infrastructure:
+      hosts:
+        vpn_gateway:
+          ansible_host: 192.168.1.14
+          ansible_user: root
+        cloudflare_tunnel:
+          ansible_host: 192.168.1.15
+          ansible_user: root
+        playit_client:
+          ansible_host: 192.168.1.17
+          ansible_user: root
+        nginx_proxy:
+          ansible_host: 192.168.1.18
+          ansible_user: root
+    workloads:
+      hosts:
+        microservice_host:
+          ansible_host: 192.168.1.13
+          ansible_user: ubuntu
+        game_server:
+          ansible_host: 192.168.1.16
+          ansible_user: debian
+  vars:
+    ansible_ssh_private_key_file: ~/.ssh/proxmox
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+    ansible_python_interpreter: /usr/bin/python3
