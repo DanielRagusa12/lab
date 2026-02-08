@@ -181,6 +181,7 @@ resource "proxmox_virtual_environment_container" "playit_client" {
     bridge = "vmbr0"
     firewall = true
   }
+  device_passthrough { path = "/dev/net/tun" }
   operating_system {
     template_file_id = proxmox_virtual_environment_download_file.ubuntu_lxc_template.id
     type             = "ubuntu"

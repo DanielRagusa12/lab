@@ -1,0 +1,71 @@
+---
+- name: Finalize Playit (Configure, Start, and Heartbeat)
+  hosts: playit_client
+  become: true
+
+  tasks:
+    - name: Stop Playit Service
+      ansible.builtin.systemd:
+        name: playit
+        state: stopped
+      ignore_errors: true
+
+    - name: Check for manual config file
+      ansible.builtin.stat:
+        path: /root/.config/playit_gg/playit.toml
+      register: manual_config
+
+    - name: Create system config directory
+      ansible.builtin.file:
+        path: /etc/playit
+        state: directory
+        mode: '0755'
+
+    - name: Migrate config to /etc/playit/
+      ansible.builtin.copy:
+        src: /root/.config/playit_gg/playit.toml
+        dest: /etc/playit/playit.toml
+        remote_src: true
+        mode: '0600'
+      when: manual_config.stat.exists
+
+    # --- PREVENT "SLEEPING" (HEARTBEAT) ---
+    - name: Install ping utility
+      ansible.builtin.apt:
+        name: iputils-ping
+        state: present
+        update_cache: true
+
+    - name: Create Keep-Alive Cron Job
+      ansible.builtin.cron:
+        name: "Playit Keepalive Heartbeat"
+        minute: "*/1"
+        job: "ping -c 1 8.8.8.8 > /dev/null 2>&1"
+
+    # --- 3. CLEANUP & START ---
+    - name: Remove custom service override
+      ansible.builtin.file:
+        path: /etc/systemd/system/playit.service
+        state: absent
+      notify: Reload Systemd
+
+    - name: Enable and Start Playit
+      ansible.builtin.systemd:
+        name: playit
+        state: restarted
+        enabled: true
+        daemon_reload: true
+
+    - name: Check Service Status
+      ansible.builtin.command: systemctl status playit
+      register: status_output
+      ignore_errors: true
+
+    - name: Display Status
+      ansible.builtin.debug:
+        var: status_output.stdout_lines
+
+  handlers:
+    - name: Reload Systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
