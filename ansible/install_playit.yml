@@ -1,70 +1,25 @@
 ---
-- name: Install and Configure Playit.gg Client
+- name: Install Playit Agent
   hosts: playit_client
   become: true
-  vars:
-    minecraft_server_ip: "{{ hostvars['game_server']['ansible_host'] }}"
 
   tasks:
-    - name: Ensure required dependencies are present
+    - name: Install basic dependencies
       ansible.builtin.apt:
-        name:
-          - curl
-          - gnupg
-          - ca-certificates
+        name: [curl, gnupg, ca-certificates]
         state: present
         update_cache: true
 
-    - name: Create directory for Playit GPG keyring
-      ansible.builtin.file:
-        path: /usr/share/keyrings
-        state: directory
-        mode: '0755'
-
-    - name: Download Playit.gg GPG key
-      ansible.builtin.get_url:
-        url: https://playit-cloud.github.io/ppa/key.gpg
-        dest: /tmp/playit.gpg
-        mode: '0644'
-
-    - name: Dearmor Playit GPG key to keyring
+    - name: Add Playit.gg Repository
       ansible.builtin.shell:
         cmd: |
-          set -o pipefail
-          gpg --dearmor < /tmp/playit.gpg > /usr/share/keyrings/playit-archive-keyring.gpg
-        executable: /bin/bash
-        creates: /usr/share/keyrings/playit-archive-keyring.gpg
+          curl -SsL https://playit-cloud.github.io/ppa/key.gpg | gpg --dearmor -o /usr/share/keyrings/playit-keyring.gpg --yes
+          echo "deb [signed-by=/usr/share/keyrings/playit-keyring.gpg] https://playit-cloud.github.io/ppa/data ./" > /etc/apt/sources.list.d/playit-official.list
+          apt-get update
+      args:
+        creates: /etc/apt/sources.list.d/playit-official.list
 
-    - name: Add Playit.gg repository to sources list
-      ansible.builtin.apt_repository:
-        repo: "deb [signed-by=/usr/share/keyrings/playit-archive-keyring.gpg] https://playit-cloud.github.io/ppa/data ./"
-        state: present
-        filename: playit-cloud
-
-    - name: Install playit agent
+    - name: Install playit package
       ansible.builtin.apt:
         name: playit
         state: present
-        update_cache: true
-
-    - name: Ensure playit service is enabled and started
-      ansible.builtin.systemd_service:
-        name: playit
-        state: started
-        enabled: true
-
-    - name: Wait for Playit to initialize and generate logs
-      ansible.builtin.pause:
-        seconds: 5
-
-    - name: Fetch Playit Claim URL from journal logs
-      ansible.builtin.command:
-        cmd: journalctl -u playit --no-pager
-      register: playit_logs
-      changed_when: false
-
-    - name: Display Claim URL
-      ansible.builtin.debug:
-        msg: >-
-          {{ playit_logs.stdout | regex_search('https://playit.gg/claim/[A-Za-z0-9]+')
-             | default('Claim URL not found. Check journalctl -u playit manually.', true) }}

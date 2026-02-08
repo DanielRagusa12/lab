@@ -58,7 +58,7 @@ resource "proxmox_virtual_environment_file" "microservice_user_data_config" {
   node_name    = "pve"
   source_raw {
     file_name = "user-init-data.yaml"
-    data = templatefile("${path.module}/host-init.tftpl", {
+    data = templatefile("${path.module}/host-init-ms.tftpl", {
       hostname = "microservice-host"
       username = "ubuntu"
       ssh_key  = trimspace(file("~/.ssh/proxmox.pub"))
@@ -72,7 +72,7 @@ resource "proxmox_virtual_environment_file" "gameserver_user_data_config" {
   node_name    = "pve"
   source_raw {
     file_name = "user-data-game-server.yaml"
-    data = templatefile("${path.module}/host-init.tftpl", {
+    data = templatefile("${path.module}/host-init-mc.tftpl", {
       hostname = "game-server"
       username = "debian"
       ssh_key  = trimspace(file("~/.ssh/proxmox.pub"))
@@ -296,6 +296,7 @@ resource "proxmox_virtual_environment_vm" "game_server" {
     file_format  = "raw"
     file_id      = proxmox_virtual_environment_download_file.debian_cloud_image.id
   }
+  
   network_device {
     bridge   = "vmbr0"
     firewall = true
@@ -355,6 +356,21 @@ resource "proxmox_virtual_environment_cluster_firewall_security_group" "manageme
 }
 
 
+# Rules applied to the physical Proxmox Node (Host)
+resource "proxmox_virtual_environment_firewall_rules" "pve_host_fw" {
+  node_name = "pve" # Your actual Proxmox node name
+
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "22" # Rsync uses SSH
+    source  = split("/", var.game_vm_ipv4_address)[0]
+    comment = "Allow Game Server Rsync Backups via SSH"
+  }
+}
+
+
 # VPN Gateway (ID 100)
 resource "proxmox_virtual_environment_firewall_rules" "vpn_fw" {
   node_name    = "pve"
@@ -382,6 +398,15 @@ resource "proxmox_virtual_environment_firewall_rules" "playit_fw" {
   rule {
     security_group = proxmox_virtual_environment_cluster_firewall_security_group.management.name
     enabled        = true
+  }
+
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    # Source is your Minecraft VM IP
+    source  = split("/", var.game_vm_ipv4_address)[0]
+    comment = "Allow return traffic from Minecraft Server"
   }
 }
 
@@ -421,6 +446,7 @@ resource "proxmox_virtual_environment_firewall_rules" "game_server_fw" {
     security_group = proxmox_virtual_environment_cluster_firewall_security_group.minecraft.name
     enabled        = true
   }
+
 
   # Allow Playit LXC to bridge traffic to Minecraft
   rule {
@@ -462,7 +488,7 @@ resource "proxmox_virtual_environment_firewall_options" "cf_opts" {
 resource "proxmox_virtual_environment_firewall_options" "playit_opts" {
   node_name    = "pve"
   container_id = 102
-  enabled      = true
+  enabled      = true     
   input_policy = "DROP"
 }
 

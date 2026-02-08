@@ -1,53 +1,77 @@
 ---
-- name: Deploy Minecraft Server
+- name: Deploy Minecraft Server (Robust Restic Edition)
   hosts: game_server
   become: true
+
+  vars_files:
+    - env.yml
+
   vars:
+    ansible_user: "debian"
+    ansible_python_interpreter: /usr/bin/python3
+
     mc_root_dir: "/home/{{ ansible_user }}/minecraft"
-    local_files_path: "~/server-golden-image/TwizzySrv"
+    proxmox_host_ip: "192.168.1.12"
+
+    restic_repo: "sftp:root@{{ proxmox_host_ip }}:/mnt/pve/minecraft_restic"
+
+    sftp_args: "-o sftp.command='ssh -i /home/{{ ansible_user }}/.ssh/id_rsa -o StrictHostKeyChecking=no root@{{ proxmox_host_ip }} -s sftp'"
 
   tasks:
-    - name: Ensure rsync is installed on the target VM
+    - name: Install dependencies
       ansible.builtin.apt:
-        name: rsync
+        name: [rsync, sshpass, python3-cryptography, cron, restic]
         state: present
+        update_cache: true
 
-    - name: Create Minecraft and data directories
+    - name: Set Timezone to US Central
+      community.general.timezone:
+        name: America/Chicago
+
+    - name: Add debian user to docker group
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: true
+
+    - name: Generate SSH key for the VM
+      community.crypto.openssh_keypair:
+        path: "/home/{{ ansible_user }}/.ssh/id_rsa"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0600'
+        type: ed25519
+      register: vm_ssh_key
+      become_user: "{{ ansible_user }}"
+
+    - name: Authorize VM key on Proxmox Host
+      ansible.builtin.shell: |
+        ssh -o StrictHostKeyChecking=no root@{{ proxmox_host_ip }} "mkdir -p ~/.ssh && grep -qF '{{ vm_ssh_key.public_key }}' ~/.ssh/authorized_keys || echo '{{ vm_ssh_key.public_key }}' >> ~/.ssh/authorized_keys"
+      delegate_to: localhost
+      become: false
+
+    - name: Initialize Restic Repo
+      ansible.builtin.shell:
+        cmd: "restic {{ sftp_args }} -r {{ restic_repo }} init"
+      environment:
+        RESTIC_PASSWORD: "{{ restic_pw }}"
+      register: restic_init
+      become_user: "{{ ansible_user }}"
+      failed_when:
+        - restic_init.rc != 0
+        - "'config file already exists' not in restic_init.stderr"
+        - "'config file already exists' not in restic_init.stdout"
+      changed_when: "'created restic repository' in restic_init.stdout"
+
+    - name: Create Minecraft Directory
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ mc_root_dir }}/data"
         state: directory
         owner: "{{ ansible_user }}"
         group: "{{ ansible_user }}"
         mode: '0755'
-      loop:
-        - "{{ mc_root_dir }}"
-        - "{{ mc_root_dir }}/data"
 
-    - name: Sync mods folder to server
-      ansible.posix.synchronize:
-        src: "{{ local_files_path }}/mods/"
-        dest: "{{ mc_root_dir }}/data/mods"
-        archive: true
-        compress: true
-        delete: true
-        rsync_opts:
-          - "-e 'ssh -i ~/.ssh/proxmox -o StrictHostKeyChecking=no'"
-
-    - name: Sync server.properties file
-      ansible.posix.synchronize:
-        src: "{{ local_files_path }}/server.properties"
-        dest: "{{ mc_root_dir }}/data/server.properties"
-        rsync_opts:
-          - "-e 'ssh -i ~/.ssh/proxmox -o StrictHostKeyChecking=no'"
-
-    - name: Fix permissions on data directory for Docker
-      ansible.builtin.file:
-        path: "{{ mc_root_dir }}/data"
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
-        recurse: true
-
-    - name: Deploy Docker Compose file from template
+    - name: Deploy Docker Compose File
       ansible.builtin.template:
         src: templates/minecraft-compose.yml.j2
         dest: "{{ mc_root_dir }}/docker-compose.yml"
@@ -55,8 +79,165 @@
         group: "{{ ansible_user }}"
         mode: '0644'
 
-    - name: Start Minecraft via Docker Compose
+    - name: Fix permissions recursively
+      ansible.builtin.file:
+        path: "{{ mc_root_dir }}"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        recurse: true
+
+
+    - name: Create Cron Scripts Directory
+      ansible.builtin.file:
+        path: "{{ mc_root_dir }}/cron-scripts"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Deploy Restic Backup Script
+      ansible.builtin.copy:
+        dest: "{{ mc_root_dir }}/cron-scripts/backup.sh"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          if ! docker ps >/dev/null 2>&1; then
+            echo "Docker permission denied. Reloading script with 'docker' group..."
+            exec sg docker -c "/bin/bash $0 $@"
+          fi
+
+          source /home/{{ ansible_user }}/.profile
+          export RESTIC_PASSWORD="{{ restic_pw }}"
+          export RESTIC_REPOSITORY="{{ restic_repo }}"
+
+          echo "Starting backup at $(date)" >> {{ mc_root_dir }}/backup.log
+
+          docker exec -i minecraft-java rcon-cli save-all
+          docker exec -i minecraft-java rcon-cli save-off
+
+          restic {{ sftp_args }} backup {{ mc_root_dir }}/data/ --tag automated --quiet
+
+          docker exec -i minecraft-java rcon-cli save-on
+
+          echo "Backup Complete at $(date)" >> {{ mc_root_dir }}/backup.log
+
+    - name: Deploy Maintenance Script
+      ansible.builtin.copy:
+        dest: "{{ mc_root_dir }}/cron-scripts/maintenance.sh"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          if ! docker ps >/dev/null 2>&1; then
+            echo "Docker permission denied. Reloading script with 'docker' group..."
+            exec sg docker -c "/bin/bash $0 $@"
+          fi
+
+          source /home/{{ ansible_user }}/.profile
+          export RESTIC_PASSWORD="{{ restic_pw }}"
+          export RESTIC_REPOSITORY="{{ restic_repo }}"
+
+          echo "Starting Daily Maintenance at $(date)..." >> {{ mc_root_dir }}/backup.log
+
+          restic {{ sftp_args }} forget \
+              --keep-daily 7 \
+              --keep-weekly 4 \
+              --keep-tag checkpoint \
+              --prune \
+              --quiet
+    
+          echo "Maintenance Complete." >> {{ mc_root_dir }}/backup.log
+
+    - name: Deploy Permanent Checkpoint Script
+      ansible.builtin.copy:
+        dest: "{{ mc_root_dir }}/checkpoint.sh"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          if ! docker ps >/dev/null 2>&1; then
+            echo "Docker permission denied. Reloading script with 'docker' group..."
+            exec sg docker -c "/bin/bash $0 $@"
+          fi
+
+          source /home/{{ ansible_user }}/.profile
+          export RESTIC_PASSWORD="{{ restic_pw }}"
+          export RESTIC_REPOSITORY="{{ restic_repo }}"
+
+          echo "=== CREATE PERMANENT CHECKPOINT ==="
+          read -p "Enter a name for this checkpoint: " USER_TAG
+          SAFE_TAG=$(echo "$USER_TAG" | tr -s ' ' '_' | tr -cd '[:alnum:]_-')
+
+          if [ -z "$SAFE_TAG" ]; then echo "Invalid name."; exit 1; fi
+
+          echo "Saving world state..."
+          docker exec -i minecraft-java rcon-cli save-all
+          docker exec -i minecraft-java rcon-cli save-off
+
+          echo "Creating backup tagged '$SAFE_TAG'..."
+          restic {{ sftp_args }} backup {{ mc_root_dir }}/data/ --tag checkpoint --tag "$SAFE_TAG" --quiet
+
+          docker exec -i minecraft-java rcon-cli save-on
+          echo "Checkpoint '$SAFE_TAG' saved."
+
+    - name: Deploy Interactive Restic Restore Script
+      ansible.builtin.copy:
+        dest: "{{ mc_root_dir }}/restore.sh"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          # --- AUTO-FIX PERMISSIONS ---
+          if ! docker ps >/dev/null 2>&1; then
+            echo "Docker permission denied. Reloading script with 'docker' group..."
+            exec sg docker -c "/bin/bash $0 $@"
+          fi
+          # ----------------------------
+
+          export RESTIC_PASSWORD="{{ restic_pw }}"
+
+          echo "--- Available Restore Points ---"
+          restic {{ sftp_args }} -r {{ restic_repo }} snapshots
+          echo ""
+          read -p "Enter Snapshot ID to restore (or Enter for 'latest'): " SNAP_ID
+          SNAP_ID=${SNAP_ID:-latest}
+
+          echo "WARNING: This will overwrite current server data."
+          read -p "Are you sure? (y/N): " CONFIRM
+          if [[ "$CONFIRM" != "y" ]]; then echo "Aborted."; exit 1; fi
+
+          echo "Stopping server and restoring $SNAP_ID..."
+          cd {{ mc_root_dir }} && docker compose stop
+
+          restic {{ sftp_args }} -r {{ restic_repo }} restore $SNAP_ID --target / --verify
+
+          docker compose start
+          echo "[$(date)] Restore of $SNAP_ID Completed" >> {{ mc_root_dir }}/backup.log
+
+
+    - name: Schedule Hourly Backup (Every Hour at Minute 0)
+      ansible.builtin.cron:
+        name: "Minecraft Restic Backup"
+        minute: "0"
+        user: "{{ ansible_user }}"
+        job: "/bin/bash {{ mc_root_dir }}/cron-scripts/backup.sh"
+
+    - name: Schedule Daily Maintenance (Every Day at 4:00 AM)
+      ansible.builtin.cron:
+        name: "Minecraft Restic Maintenance"
+        minute: "0"
+        hour: "4"
+        user: "{{ ansible_user }}"
+        job: "/bin/bash {{ mc_root_dir }}/cron-scripts/maintenance.sh"
+
+    - name: Start Minecraft Server (Docker Compose)
       community.docker.docker_compose_v2:
         project_src: "{{ mc_root_dir }}"
         state: present
-        wait: true
+        pull: always
+      register: output

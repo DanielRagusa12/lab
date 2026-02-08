@@ -47,7 +47,6 @@
         state: present
         update_cache: true
 
-    # --- FIREWALL HARDENING ---
     - name: UFW - Allow SSH from local network
       community.general.ufw:
         rule: allow
