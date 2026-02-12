@@ -1,6 +1,6 @@
 ---
 - name: Deploy Tailscale Native Subnet Router and Harden Firewall
-  hosts: tailscale_lxc
+  hosts: vpn_gateway
   become: true
   vars_files:
     - env.yml

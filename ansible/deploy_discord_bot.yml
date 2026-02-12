@@ -1,6 +1,6 @@
 ---
 - name: Production Deployment - Discord Music Bot
-  hosts: microservice-host
+  hosts: microservice_host
   become: true
   vars_files:
     - env.yml

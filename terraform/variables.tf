@@ -3,12 +3,6 @@
 # =============================================================================
 
 
-variable "pve_api_token" {
-  description = "The API token for Proxmox"
-  type        = string
-  sensitive   = true
-}
-
 variable "pve_ssh_key" {
   description = "Path to the private SSH key"
   type        = string
@@ -24,7 +18,7 @@ variable "pve_username" {
 variable "pve_password" {
   description = "The password for the Proxmox user"
   type        = string
-  sensitive   = true 
+  sensitive   = true
 }
 
 variable "pve_endpoint" {
