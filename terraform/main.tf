@@ -448,6 +448,36 @@ resource "proxmox_virtual_environment_firewall_rules" "game_server_fw" {
     enabled        = true
   }
 
+  # Allow RCON from Management/Microservice Host
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "25575"
+    source  = split("/", var.ms_vm_ipv4_address)[0]
+    comment = "Allow RCON from Microservice Host"
+  }
+
+  # Allow RCON from Developer Workstation
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "25575"
+    source  = var.workstation_ipv4_address  # <--- Allow YOUR laptop
+    comment = "Allow RCON from Dev Workstation"
+  }
+
+  # Allow SSH from Microservice Host (For Remote Logs)
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "22"
+    source  = split("/", var.ms_vm_ipv4_address)[0]
+    comment = "Allow Dashboard to fetch Logs via SSH"
+  }
+
 
   # Allow Playit LXC to bridge traffic to Minecraft
   rule {

@@ -14,13 +14,16 @@
     proxmox_host_ip: "192.168.1.12"
 
     restic_repo: "sftp:root@{{ proxmox_host_ip }}:/mnt/pve/minecraft_restic"
-
     sftp_args: "-o sftp.command='ssh -i /home/{{ ansible_user }}/.ssh/id_rsa -o StrictHostKeyChecking=no root@{{ proxmox_host_ip }} -s sftp'"
+    
+    # Version pinpointed for manual install
+    neoforge_ver: "21.1.219"
 
   tasks:
     - name: Install dependencies
       ansible.builtin.apt:
-        name: [rsync, sshpass, python3-cryptography, cron, restic]
+        # Added default-jre-headless to ensure the host can run the installer jar
+        name: [rsync, sshpass, python3-cryptography, cron, restic, default-jre-headless]
         state: present
         update_cache: true
 
@@ -71,6 +74,35 @@
         group: "{{ ansible_user }}"
         mode: '0755'
 
+    # --- MANUAL NEOFORGE INSTALLATION ---
+    - name: Download NeoForge Installer
+      ansible.builtin.get_url:
+        url: "https://maven.neoforged.net/releases/net/neoforged/neoforge/{{ neoforge_ver }}/neoforge-{{ neoforge_ver }}-installer.jar"
+        dest: "{{ mc_root_dir }}/data/neoforge-installer.jar"
+        mode: '0755'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Run NeoForge Manual Installer
+      ansible.builtin.command:
+        cmd: "java -jar neoforge-installer.jar --installServer"
+        chdir: "{{ mc_root_dir }}/data"
+      become_user: "{{ ansible_user }}"
+      args:
+        creates: "{{ mc_root_dir }}/data/libraries"
+
+    # --- GOLDEN IMAGE MOD SYNC ---
+    - name: Sync Mods from Golden Image (Arch Machine)
+      ansible.posix.synchronize:
+        src: /home/daniel/server-golden-image/mods/
+        dest: "{{ mc_root_dir }}/data/mods/"
+        delete: true
+        recursive: true
+        rsync_opts:
+          - "--archive"
+          - "--no-owner"
+          - "--no-group"
+
     - name: Deploy Docker Compose File
       ansible.builtin.template:
         src: templates/minecraft-compose.yml.j2
@@ -85,7 +117,6 @@
         owner: "{{ ansible_user }}"
         group: "{{ ansible_user }}"
         recurse: true
-
 
     - name: Create Cron Scripts Directory
       ansible.builtin.file:
@@ -104,23 +135,16 @@
         content: |
           #!/bin/bash
           if ! docker ps >/dev/null 2>&1; then
-            echo "Docker permission denied. Reloading script with 'docker' group..."
             exec sg docker -c "/bin/bash $0 $@"
           fi
-
           source /home/{{ ansible_user }}/.profile
           export RESTIC_PASSWORD="{{ restic_pw }}"
           export RESTIC_REPOSITORY="{{ restic_repo }}"
-
           echo "Starting backup at $(date)" >> {{ mc_root_dir }}/backup.log
-
           docker exec -i minecraft-java rcon-cli save-all
           docker exec -i minecraft-java rcon-cli save-off
-
           restic {{ sftp_args }} backup {{ mc_root_dir }}/data/ --tag automated --quiet
-
           docker exec -i minecraft-java rcon-cli save-on
-
           echo "Backup Complete at $(date)" >> {{ mc_root_dir }}/backup.log
 
     - name: Deploy Maintenance Script
@@ -132,23 +156,13 @@
         content: |
           #!/bin/bash
           if ! docker ps >/dev/null 2>&1; then
-            echo "Docker permission denied. Reloading script with 'docker' group..."
             exec sg docker -c "/bin/bash $0 $@"
           fi
-
           source /home/{{ ansible_user }}/.profile
           export RESTIC_PASSWORD="{{ restic_pw }}"
           export RESTIC_REPOSITORY="{{ restic_repo }}"
-
           echo "Starting Daily Maintenance at $(date)..." >> {{ mc_root_dir }}/backup.log
-
-          restic {{ sftp_args }} forget \
-              --keep-daily 7 \
-              --keep-weekly 4 \
-              --keep-tag checkpoint \
-              --prune \
-              --quiet
-    
+          restic {{ sftp_args }} forget --keep-daily 7 --keep-weekly 4 --keep-tag checkpoint --prune --quiet
           echo "Maintenance Complete." >> {{ mc_root_dir }}/backup.log
 
     - name: Deploy Permanent Checkpoint Script
@@ -160,27 +174,18 @@
         content: |
           #!/bin/bash
           if ! docker ps >/dev/null 2>&1; then
-            echo "Docker permission denied. Reloading script with 'docker' group..."
             exec sg docker -c "/bin/bash $0 $@"
           fi
-
           source /home/{{ ansible_user }}/.profile
           export RESTIC_PASSWORD="{{ restic_pw }}"
           export RESTIC_REPOSITORY="{{ restic_repo }}"
-
           echo "=== CREATE PERMANENT CHECKPOINT ==="
           read -p "Enter a name for this checkpoint: " USER_TAG
           SAFE_TAG=$(echo "$USER_TAG" | tr -s ' ' '_' | tr -cd '[:alnum:]_-')
-
           if [ -z "$SAFE_TAG" ]; then echo "Invalid name."; exit 1; fi
-
-          echo "Saving world state..."
           docker exec -i minecraft-java rcon-cli save-all
           docker exec -i minecraft-java rcon-cli save-off
-
-          echo "Creating backup tagged '$SAFE_TAG'..."
           restic {{ sftp_args }} backup {{ mc_root_dir }}/data/ --tag checkpoint --tag "$SAFE_TAG" --quiet
-
           docker exec -i minecraft-java rcon-cli save-on
           echo "Checkpoint '$SAFE_TAG' saved."
 
@@ -192,42 +197,29 @@
         mode: '0755'
         content: |
           #!/bin/bash
-          # --- AUTO-FIX PERMISSIONS ---
           if ! docker ps >/dev/null 2>&1; then
-            echo "Docker permission denied. Reloading script with 'docker' group..."
             exec sg docker -c "/bin/bash $0 $@"
           fi
-          # ----------------------------
-
           export RESTIC_PASSWORD="{{ restic_pw }}"
-
           echo "--- Available Restore Points ---"
           restic {{ sftp_args }} -r {{ restic_repo }} snapshots
           echo ""
           read -p "Enter Snapshot ID to restore (or Enter for 'latest'): " SNAP_ID
           SNAP_ID=${SNAP_ID:-latest}
-
-          echo "WARNING: This will overwrite current server data."
           read -p "Are you sure? (y/N): " CONFIRM
           if [[ "$CONFIRM" != "y" ]]; then echo "Aborted."; exit 1; fi
-
-          echo "Stopping server and restoring $SNAP_ID..."
           cd {{ mc_root_dir }} && docker compose stop
-
           restic {{ sftp_args }} -r {{ restic_repo }} restore $SNAP_ID --target / --verify
-
           docker compose start
-          echo "[$(date)] Restore of $SNAP_ID Completed" >> {{ mc_root_dir }}/backup.log
 
-
-    - name: Schedule Hourly Backup (Every Hour at Minute 0)
+    - name: Schedule Hourly Backup
       ansible.builtin.cron:
         name: "Minecraft Restic Backup"
         minute: "0"
         user: "{{ ansible_user }}"
         job: "/bin/bash {{ mc_root_dir }}/cron-scripts/backup.sh"
 
-    - name: Schedule Daily Maintenance (Every Day at 4:00 AM)
+    - name: Schedule Daily Maintenance
       ansible.builtin.cron:
         name: "Minecraft Restic Maintenance"
         minute: "0"
