@@ -2,8 +2,18 @@
 - name: Deploy Tailscale Native Subnet Router and Harden Firewall
   hosts: vpn_gateway
   become: true
-  vars_files:
-    - env.yml
+
+  pre_tasks:
+    - name: Load secret variables
+      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
+      vars:
+        params:
+          files:
+            - vault.yml
+            - env.yml
+          paths:
+            - "{{ playbook_dir }}"
+      no_log: true
 
   tasks:
     - name: Enable IPv4 forwarding in the kernel
@@ -91,3 +101,4 @@
           --accept-dns=false
       when: "'Running' not in (ts_status.stdout | from_json).BackendState"
       changed_when: true
+      no_log: true

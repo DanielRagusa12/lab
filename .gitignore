@@ -4,11 +4,12 @@
 *.tfstate.backup
 *.tfvars
 *.tfvars.json
-.terraform.lock.hcl
 *.backup
+terraform_debug.log
 
 # === Ansible ===
 env.yml
+vault.yml
 *.retry
 .vault_pass
 
@@ -17,5 +18,3 @@ env.yml
 .vscode/
 .idea/
 *.log
-*.sh
-

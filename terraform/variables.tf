@@ -26,6 +26,12 @@ variable "pve_endpoint" {
   type        = string
 }
 
+variable "pve_tls_insecure" {
+  description = "Allow insecure TLS to Proxmox API (set true only for temporary/self-signed lab bootstrap)"
+  type        = bool
+  default     = false
+}
+
 # =============================================================================
 # NODES
 # =============================================================================

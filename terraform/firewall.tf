@@ -14,18 +14,6 @@ resource "proxmox_virtual_environment_cluster_firewall_security_group" "web_traf
   }
 }
 
-resource "proxmox_virtual_environment_cluster_firewall_security_group" "minecraft" {
-  name    = "minecraft-traffic"
-  comment = "Allow Minecraft default port"
-  rule {
-    type    = "in"
-    action  = "ACCEPT"
-    proto   = "tcp"
-    dport   = "25565"
-    comment = "Allow MC Java"
-  }
-}
-
 resource "proxmox_virtual_environment_cluster_firewall_security_group" "management" {
   name    = "my_management"
   comment = "Allow SSH and ICMP ONLY from workstation"
@@ -95,8 +83,9 @@ resource "proxmox_virtual_environment_firewall_rules" "playit_fw" {
     type    = "in"
     action  = "ACCEPT"
     proto   = "tcp"
+    dport   = "25565"
     source  = split("/", var.game_vm_ipv4_address)[0]
-    comment = "Allow return traffic from Minecraft Server"
+    comment = "Allow Minecraft bridge traffic from Game Server"
   }
 }
 
@@ -132,11 +121,6 @@ resource "proxmox_virtual_environment_firewall_rules" "game_server_fw" {
     security_group = proxmox_virtual_environment_cluster_firewall_security_group.management.name
     enabled        = true
   }
-  rule {
-    security_group = proxmox_virtual_environment_cluster_firewall_security_group.minecraft.name
-    enabled        = true
-  }
-
   # Allow RCON from Management/Microservice Host
   rule {
     type    = "in"

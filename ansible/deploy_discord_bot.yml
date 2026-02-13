@@ -2,8 +2,18 @@
 - name: Production Deployment - Discord Music Bot
   hosts: microservice_host
   become: true
-  vars_files:
-    - env.yml
+
+  pre_tasks:
+    - name: Load secret variables
+      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
+      vars:
+        params:
+          files:
+            - vault.yml
+            - env.yml
+          paths:
+            - "{{ playbook_dir }}"
+      no_log: true
 
   vars:
     remote_bot_path: "/opt/music-bot"
@@ -41,3 +51,4 @@
           DISCORD_BOT_TOKEN: "{{ discord_token }}"
         devices:
           - "/dev/snd:/dev/snd"
+      no_log: true

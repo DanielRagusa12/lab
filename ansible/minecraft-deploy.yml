@@ -3,8 +3,17 @@
   hosts: game_server
   become: true
 
-  vars_files:
-    - env.yml
+  pre_tasks:
+    - name: Load secret variables
+      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
+      vars:
+        params:
+          files:
+            - vault.yml
+            - env.yml
+          paths:
+            - "{{ playbook_dir }}"
+      no_log: true
 
   vars:
     ansible_user: "debian"
@@ -15,7 +24,7 @@
     proxmox_host_ip: "192.168.1.12"
 
     restic_repo: "sftp:root@{{ proxmox_host_ip }}:/mnt/pve/minecraft_restic"
-    sftp_args: "-o sftp.command='ssh -i /home/{{ ansible_user }}/.ssh/id_rsa -o StrictHostKeyChecking=no root@{{ proxmox_host_ip }} -s sftp'"
+    sftp_args: "-o sftp.command='ssh -i /home/{{ ansible_user }}/.ssh/id_rsa root@{{ proxmox_host_ip }} -s sftp'"
     
     # Version pinpointed for manual install
     neoforge_ver: "21.1.219"
@@ -48,9 +57,25 @@
       register: vm_ssh_key
       become_user: "{{ ansible_user }}"
 
+    - name: Add Proxmox host key for local SSH operations
+      ansible.builtin.known_hosts:
+        path: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ssh/known_hosts"
+        name: "{{ proxmox_host_ip }}"
+        key: "{{ lookup('ansible.builtin.pipe', 'ssh-keyscan -H ' ~ proxmox_host_ip ~ ' 2>/dev/null') }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Add Proxmox host key for restic SSH transport
+      ansible.builtin.known_hosts:
+        path: "/home/{{ ansible_user }}/.ssh/known_hosts"
+        name: "{{ proxmox_host_ip }}"
+        key: "{{ lookup('ansible.builtin.pipe', 'ssh-keyscan -H ' ~ proxmox_host_ip ~ ' 2>/dev/null') }}"
+      become_user: "{{ ansible_user }}"
+
     - name: Authorize VM key on Proxmox Host
       ansible.builtin.shell: |
-        ssh -i {{ proxmox_ssh_key_path }} -o BatchMode=yes -o StrictHostKeyChecking=no root@{{ proxmox_host_ip }} "mkdir -p ~/.ssh && grep -qF '{{ vm_ssh_key.public_key }}' ~/.ssh/authorized_keys || echo '{{ vm_ssh_key.public_key }}' >> ~/.ssh/authorized_keys"
+        ssh -i {{ proxmox_ssh_key_path }} -o BatchMode=yes root@{{ proxmox_host_ip }} "mkdir -p ~/.ssh && grep -qF '{{ vm_ssh_key.public_key }}' ~/.ssh/authorized_keys || echo '{{ vm_ssh_key.public_key }}' >> ~/.ssh/authorized_keys"
       delegate_to: localhost
       become: false
 
@@ -66,6 +91,7 @@
         - "'config file already exists' not in restic_init.stderr"
         - "'config file already exists' not in restic_init.stdout"
       changed_when: "'created restic repository' in restic_init.stdout"
+      no_log: true
 
     - name: Create Minecraft Directory
       ansible.builtin.file:
@@ -74,6 +100,37 @@
         owner: "{{ ansible_user }}"
         group: "{{ ansible_user }}"
         mode: '0755'
+
+    - name: Ensure RCON is enabled in server.properties
+      ansible.builtin.lineinfile:
+        path: "{{ mc_root_dir }}/data/server.properties"
+        regexp: '^enable-rcon='
+        line: 'enable-rcon=true'
+        create: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Ensure RCON port is set in server.properties
+      ansible.builtin.lineinfile:
+        path: "{{ mc_root_dir }}/data/server.properties"
+        regexp: '^rcon.port='
+        line: 'rcon.port=25575'
+        create: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Ensure RCON password is set in server.properties
+      ansible.builtin.lineinfile:
+        path: "{{ mc_root_dir }}/data/server.properties"
+        regexp: '^rcon.password='
+        line: "rcon.password={{ rcon_password }}"
+        create: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+      no_log: true
 
     # --- MANUAL NEOFORGE INSTALLATION ---
     - name: Download NeoForge Installer
@@ -111,6 +168,7 @@
         owner: "{{ ansible_user }}"
         group: "{{ ansible_user }}"
         mode: '0644'
+      no_log: true
 
     - name: Fix permissions recursively
       ansible.builtin.file:
@@ -147,6 +205,7 @@
           restic {{ sftp_args }} backup {{ mc_root_dir }}/data/ --tag automated --quiet
           docker exec -i minecraft-java rcon-cli save-on
           echo "Backup Complete at $(date)" >> {{ mc_root_dir }}/backup.log
+      no_log: true
 
     - name: Deploy Maintenance Script
       ansible.builtin.copy:
@@ -163,8 +222,9 @@
           export RESTIC_PASSWORD="{{ restic_pw }}"
           export RESTIC_REPOSITORY="{{ restic_repo }}"
           echo "Starting Daily Maintenance at $(date)..." >> {{ mc_root_dir }}/backup.log
-          restic {{ sftp_args }} forget --keep-daily 7 --keep-weekly 4 --keep-tag checkpoint --prune --quiet
+          restic {{ sftp_args }} forget --keep-hourly 48 --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --keep-yearly 2 --keep-tag checkpoint --prune --quiet
           echo "Maintenance Complete." >> {{ mc_root_dir }}/backup.log
+      no_log: true
 
     - name: Deploy Permanent Checkpoint Script
       ansible.builtin.copy:
@@ -189,6 +249,7 @@
           restic {{ sftp_args }} backup {{ mc_root_dir }}/data/ --tag checkpoint --tag "$SAFE_TAG" --quiet
           docker exec -i minecraft-java rcon-cli save-on
           echo "Checkpoint '$SAFE_TAG' saved."
+      no_log: true
 
     - name: Deploy Interactive Restic Restore Script
       ansible.builtin.copy:
@@ -212,6 +273,7 @@
           cd {{ mc_root_dir }} && docker compose stop
           restic {{ sftp_args }} -r {{ restic_repo }} restore $SNAP_ID --target / --verify
           docker compose start
+      no_log: true
 
     - name: Schedule Hourly Backup
       ansible.builtin.cron:
@@ -233,4 +295,5 @@
         project_src: "{{ mc_root_dir }}"
         state: present
         pull: always
+        recreate: always
       register: output

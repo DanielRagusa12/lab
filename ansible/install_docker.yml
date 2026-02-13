@@ -26,20 +26,14 @@
         force: true
 
     - name: Add Docker repository to Apt sources
-      ansible.builtin.shell:
-        cmd: |
-          set -o pipefail
-          ARCH=$(dpkg --print-architecture)
-          # FIXED: Use ansible_facts['distribution']
-          OS_DIST="{{ ansible_facts['distribution'] | lower }}"
-          OS_VER=$(. /etc/os-release && echo "$VERSION_CODENAME")
-          KEY="/etc/apt/keyrings/docker.asc"
-          REPO="https://download.docker.com/linux/$OS_DIST"
-
-          ENTRY="deb [arch=$ARCH signed-by=$KEY] $REPO $OS_VER stable"
-          echo "$ENTRY" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-        creates: /etc/apt/sources.list.d/docker.list
-        executable: /bin/bash
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(ansible_facts['architecture'], ansible_facts['architecture']) }}
+          signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}
+          {{ ansible_facts['distribution_release'] }} stable
+        state: present
+        filename: docker
 
     - name: Install Docker Engine
       ansible.builtin.apt:
