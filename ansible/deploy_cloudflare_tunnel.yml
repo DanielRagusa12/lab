@@ -1,0 +1,335 @@
+---
+- name: Deploy Cloudflare Tunnel Connector
+  hosts: cloudflare_tunnel
+  become: true
+
+  vars:
+    cloudflare_api_base: "https://api.cloudflare.com/client/v4"
+
+  pre_tasks:
+    - name: Load secret variables
+      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
+      vars:
+        params:
+          files:
+            - vault.yml
+            - env.yml
+          paths:
+            - "{{ playbook_dir }}"
+      no_log: true
+
+    - name: Validate required Cloudflare variables
+      ansible.builtin.assert:
+        that:
+          - cloudflare_api_token is defined
+          - cloudflare_api_token | length > 0
+          - cloudflare_account_id is defined
+          - cloudflare_account_id | length > 0
+          - cloudflare_tunnel_name is defined
+          - cloudflare_tunnel_name | length > 0
+        fail_msg: >-
+          Define cloudflare_api_token, cloudflare_account_id, and cloudflare_tunnel_name
+          in vault.yml or env.yml before running this playbook.
+
+    - name: Validate optional publish variables
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              cloudflare_zone_id | default('') | length == 0 and
+              cloudflare_tunnel_hostname | default('') | length == 0 and
+              cloudflare_tunnel_service | default('') | length == 0
+            ) or (
+              cloudflare_zone_id | default('') | length > 0 and
+              cloudflare_tunnel_hostname | default('') | length > 0 and
+              cloudflare_tunnel_service | default('') | length > 0
+            )
+        fail_msg: >-
+          To publish a hostname, set cloudflare_zone_id, cloudflare_tunnel_hostname,
+          and cloudflare_tunnel_service together. Leave all three unset to skip
+          hostname and DNS management.
+
+  tasks:
+    - name: Determine whether to configure a public hostname
+      ansible.builtin.set_fact:
+        cloudflare_publish_app: >-
+          {{
+            cloudflare_zone_id | default('') | length > 0 and
+            cloudflare_tunnel_hostname | default('') | length > 0 and
+            cloudflare_tunnel_service | default('') | length > 0
+          }}
+
+    - name: Install dependencies
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+
+    - name: Create keyring directory
+      ansible.builtin.file:
+        path: /usr/share/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Cloudflare package signing key
+      ansible.builtin.get_url:
+        url: https://pkg.cloudflare.com/cloudflare-main.gpg
+        dest: /usr/share/keyrings/cloudflare-main.gpg
+        mode: '0644'
+
+    - name: Add Cloudflare cloudflared apt repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main"
+        state: present
+        filename: cloudflared
+
+    - name: Install cloudflared
+      ansible.builtin.apt:
+        name: cloudflared
+        state: present
+        update_cache: true
+
+    - name: Fetch existing tunnels
+      ansible.builtin.uri:
+        url: "{{ cloudflare_api_base }}/accounts/{{ cloudflare_account_id }}/cfd_tunnel"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: application/json
+        return_content: true
+        status_code: 200
+      register: cloudflare_tunnel_list
+      changed_when: false
+      no_log: true
+
+    - name: Locate tunnel by name
+      ansible.builtin.set_fact:
+        cloudflare_existing_tunnel: >-
+          {{
+            (cloudflare_tunnel_list.json.result
+            | selectattr('name', 'equalto', cloudflare_tunnel_name)
+            | list
+            | first)
+            | default({})
+          }}
+
+    - name: Create tunnel when missing
+      ansible.builtin.uri:
+        url: "{{ cloudflare_api_base }}/accounts/{{ cloudflare_account_id }}/cfd_tunnel"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          name: "{{ cloudflare_tunnel_name }}"
+          config_src: cloudflare
+        return_content: true
+        status_code:
+          - 200
+          - 201
+      register: cloudflare_tunnel_create
+      when: cloudflare_existing_tunnel | length == 0
+      changed_when: true
+      no_log: true
+
+    - name: Set tunnel ID
+      ansible.builtin.set_fact:
+        cloudflare_tunnel_id: >-
+          {{
+            cloudflare_existing_tunnel.id
+            if cloudflare_existing_tunnel | length > 0
+            else cloudflare_tunnel_create.json.result.id
+          }}
+
+    - name: Fetch tunnel token
+      ansible.builtin.uri:
+        url: "{{ cloudflare_api_base }}/accounts/{{ cloudflare_account_id }}/cfd_tunnel/{{ cloudflare_tunnel_id }}/token"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: application/json
+        return_content: true
+        status_code: 200
+      register: cloudflare_tunnel_token_response
+      changed_when: false
+      no_log: true
+
+    - name: Normalize tunnel token payload
+      ansible.builtin.set_fact:
+        cloudflare_tunnel_token: "{{ cloudflare_tunnel_token_response.json.result.token | default(cloudflare_tunnel_token_response.json.result, true) }}"
+      no_log: true
+
+    - name: Build desired ingress rules
+      ansible.builtin.set_fact:
+        cloudflare_desired_ingress:
+          - hostname: "{{ cloudflare_tunnel_hostname }}"
+            service: "{{ cloudflare_tunnel_service }}"
+            originRequest: {}
+          - service: "http_status:404"
+      when: cloudflare_publish_app | bool
+
+    - name: Fetch current tunnel configuration
+      ansible.builtin.uri:
+        url: "{{ cloudflare_api_base }}/accounts/{{ cloudflare_account_id }}/cfd_tunnel/{{ cloudflare_tunnel_id }}/configurations"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: application/json
+        return_content: true
+        status_code: 200
+      register: cloudflare_current_configuration
+      when: cloudflare_publish_app | bool
+      changed_when: false
+      no_log: true
+
+    - name: Apply tunnel ingress configuration
+      ansible.builtin.uri:
+        url: "{{ cloudflare_api_base }}/accounts/{{ cloudflare_account_id }}/cfd_tunnel/{{ cloudflare_tunnel_id }}/configurations"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          config:
+            ingress:
+              - hostname: "{{ cloudflare_tunnel_hostname }}"
+                service: "{{ cloudflare_tunnel_service }}"
+                originRequest: {}
+              - service: "http_status:404"
+        return_content: true
+        status_code: 200
+      when:
+        - cloudflare_publish_app | bool
+        - (cloudflare_current_configuration.json.result.config.ingress | default([])) != cloudflare_desired_ingress
+      changed_when: true
+      no_log: true
+
+    - name: Look up existing DNS CNAME record
+      ansible.builtin.uri:
+        url: "{{ cloudflare_api_base }}/zones/{{ cloudflare_zone_id }}/dns_records?type=CNAME&name={{ cloudflare_tunnel_hostname }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: application/json
+        return_content: true
+        status_code: 200
+      register: cloudflare_dns_lookup
+      when: cloudflare_publish_app | bool
+      changed_when: false
+      no_log: true
+
+    - name: Select existing DNS record
+      ansible.builtin.set_fact:
+        cloudflare_existing_dns_record: "{{ (cloudflare_dns_lookup.json.result | first) | default({}) }}"
+      when: cloudflare_publish_app | bool
+
+    - name: Create DNS CNAME to tunnel
+      ansible.builtin.uri:
+        url: "{{ cloudflare_api_base }}/zones/{{ cloudflare_zone_id }}/dns_records"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          type: CNAME
+          name: "{{ cloudflare_tunnel_hostname }}"
+          content: "{{ cloudflare_tunnel_id }}.cfargotunnel.com"
+          proxied: true
+        return_content: true
+        status_code:
+          - 200
+          - 201
+      when:
+        - cloudflare_publish_app | bool
+        - cloudflare_existing_dns_record | length == 0
+      changed_when: true
+      no_log: true
+
+    - name: Update DNS CNAME when it drifts
+      ansible.builtin.uri:
+        url: "{{ cloudflare_api_base }}/zones/{{ cloudflare_zone_id }}/dns_records/{{ cloudflare_existing_dns_record.id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          type: CNAME
+          name: "{{ cloudflare_tunnel_hostname }}"
+          content: "{{ cloudflare_tunnel_id }}.cfargotunnel.com"
+          proxied: true
+        return_content: true
+        status_code: 200
+      when:
+        - cloudflare_publish_app | bool
+        - cloudflare_existing_dns_record | length > 0
+        - >-
+          cloudflare_existing_dns_record.content != (cloudflare_tunnel_id ~ '.cfargotunnel.com')
+          or (cloudflare_existing_dns_record.proxied | default(false)) != true
+      changed_when: true
+      no_log: true
+
+    - name: Check whether cloudflared service unit exists
+      ansible.builtin.stat:
+        path: /etc/systemd/system/cloudflared.service
+      register: cloudflared_service_unit
+
+    - name: Install cloudflared system service with tunnel token
+      ansible.builtin.command:
+        cmd: "cloudflared service install {{ cloudflare_tunnel_token }}"
+      when: not cloudflared_service_unit.stat.exists
+      changed_when: true
+      no_log: true
+
+    - name: Ensure tunnel token is stored in /etc/default/cloudflared
+      ansible.builtin.lineinfile:
+        path: /etc/default/cloudflared
+        regexp: '^TUNNEL_TOKEN='
+        line: "TUNNEL_TOKEN={{ cloudflare_tunnel_token }}"
+        create: true
+        owner: root
+        group: root
+        mode: '0600'
+      notify: Restart cloudflared
+      no_log: true
+
+    - name: Enable and start cloudflared
+      ansible.builtin.systemd:
+        name: cloudflared
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Fetch tunnel status
+      ansible.builtin.uri:
+        url: "{{ cloudflare_api_base }}/accounts/{{ cloudflare_account_id }}/cfd_tunnel/{{ cloudflare_tunnel_id }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: application/json
+        return_content: true
+        status_code: 200
+      register: cloudflare_tunnel_status
+      changed_when: false
+      no_log: true
+
+    - name: Print deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "Tunnel ID: {{ cloudflare_tunnel_id }}"
+          - "Tunnel status: {{ cloudflare_tunnel_status.json.result.status | default('unknown') }}"
+          - "Active connections: {{ cloudflare_tunnel_status.json.result.connections | default([]) | length }}"
+          - "{{ 'Published hostname: ' ~ cloudflare_tunnel_hostname if cloudflare_publish_app | bool else 'Public hostname and DNS management were skipped.' }}"
+
+  handlers:
+    - name: Restart cloudflared
+      ansible.builtin.systemd:
+        name: cloudflared
+        state: restarted
+        daemon_reload: true

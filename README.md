@@ -48,6 +48,7 @@ Common playbooks:
 - `install_docker.yml`: installs Docker engine and dependencies on workload hosts
 - `minecraft-deploy.yml`: deploys Minecraft server, NeoForge install, restic backup scripts, cron jobs
 - `deploy_tailscale.yml`: configures VPN gateway as Tailscale subnet router
+- `deploy_cloudflare_tunnel.yml`: installs cloudflared, provisions/updates tunnel via API, and manages optional hostname DNS
 - `install_playit.yml` + `start_playit.yml`: installs and starts Playit agent
 - `deploy_portainer.yml`: deploys Portainer UI on microservice host
 - `deploy_portainer_agent.yml`: deploys Portainer agent on game server
@@ -65,6 +66,7 @@ terraform validate
 ansible-playbook -i inventory.yml install_docker.yml --syntax-check
 ansible-playbook -i inventory.yml minecraft-deploy.yml --syntax-check
 ansible-playbook -i inventory.yml deploy_tailscale.yml --syntax-check
+ansible-playbook -i inventory.yml deploy_cloudflare_tunnel.yml --syntax-check
 ansible-playbook -i inventory.yml install_playit.yml --syntax-check
 ansible-playbook -i inventory.yml start_playit.yml --syntax-check
 ansible-playbook -i inventory.yml deploy_portainer.yml --syntax-check
