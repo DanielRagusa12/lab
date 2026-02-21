@@ -13,8 +13,9 @@ services:
       CUSTOM_SERVER: "/data/run.sh"
       # We tell the image to skip trying to download forge/neoforge binaries
       SKIP_JAR_DOWNLOAD: "true"
-      MEMORY: "8G"
+      MEMORY: "16G"
       RCON_PASSWORD: "{{ rcon_password }}"
+      ENABLE_COMMAND_BLOCK: "true"
     volumes:
       - ./data:/data
     restart: unless-stopped

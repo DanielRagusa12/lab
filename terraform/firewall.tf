@@ -111,6 +111,15 @@ resource "proxmox_virtual_environment_firewall_rules" "ms_host_fw" {
     security_group = proxmox_virtual_environment_cluster_firewall_security_group.management.name
     enabled        = true
   }
+
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "5000"
+    source  = split("/", var.tunnel_lxc_ipv4_address)[0]
+    comment = "Allow Cloudflare Tunnel to dashboard endpoint"
+  }
 }
 
 # Game Server (ID 201)
@@ -159,6 +168,26 @@ resource "proxmox_virtual_environment_firewall_rules" "game_server_fw" {
     dport   = "25565"
     source  = split("/", var.playit_lxc_ipv4_address)[0]
     comment = "Allow Playit Tunnel"
+  }
+
+  # Allow direct local workstation access to Minecraft
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "25565"
+    source  = var.workstation_ipv4_address
+    comment = "Allow Minecraft from Dev Workstation"
+  }
+
+  # Allow direct local LAN access to Minecraft
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "25565"
+    source  = "192.168.1.0/24"
+    comment = "Allow Minecraft from Local LAN"
   }
 
   # Allow Portainer (Microservice VM) to monitor Docker

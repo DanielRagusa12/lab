@@ -189,7 +189,7 @@ resource "proxmox_virtual_environment_vm" "game_server" {
     type  = "host"
   }
   scsi_hardware = "virtio-scsi-pci"
-  memory { dedicated = 12288 }
+  memory { dedicated = 18432 }
   serial_device {}
   vga { type = "serial0" }
   agent {

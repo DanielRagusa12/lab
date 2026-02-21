@@ -161,6 +161,36 @@
           - "--no-owner"
           - "--no-group"
 
+    - name: Sync KubeJS Scripts from Golden Image (Arch Machine)
+      ansible.posix.synchronize:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        delete: true
+        recursive: true
+        rsync_opts:
+          - "--archive"
+          - "--no-owner"
+          - "--no-group"
+      loop:
+        - src: "/home/daniel/server-golden-image/kubejs-scripts/server_scripts/"
+          dest: "{{ mc_root_dir }}/data/kubejs/server_scripts/"
+        - src: "/home/daniel/server-golden-image/kubejs-scripts/startup_scripts/"
+          dest: "{{ mc_root_dir }}/data/kubejs/startup_scripts/"
+      loop_control:
+        label: "{{ item.dest }}"
+
+    - name: Sync Config Files from Golden Image (Arch Machine)
+      ansible.posix.synchronize:
+        src: "{{ item }}"
+        dest: "{{ mc_root_dir }}/data/config/"
+        rsync_opts:
+          - "--archive"
+          - "--no-owner"
+          - "--no-group"
+      loop: "{{ query('ansible.builtin.fileglob', '/home/daniel/server-golden-image/configs/*') }}"
+      loop_control:
+        label: "{{ item | basename }}"
+
     - name: Deploy Docker Compose File
       ansible.builtin.template:
         src: templates/minecraft-compose.yml.j2
