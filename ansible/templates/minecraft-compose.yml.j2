@@ -16,6 +16,7 @@ services:
       MEMORY: "16G"
       RCON_PASSWORD: "{{ rcon_password }}"
       ENABLE_COMMAND_BLOCK: "true"
+      MOTD: "ChudCraft"
     volumes:
       - ./data:/data
     restart: unless-stopped

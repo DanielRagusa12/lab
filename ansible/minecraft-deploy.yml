@@ -150,6 +150,15 @@
         creates: "{{ mc_root_dir }}/data/libraries"
 
     # --- GOLDEN IMAGE MOD SYNC ---
+    - name: Sync server icon from Golden Image (Arch Machine)
+      ansible.builtin.copy:
+        src: /home/daniel/server-golden-image/server-icon/server-icon.png
+        dest: "{{ mc_root_dir }}/data/server-icon.png"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+        force: true
+
     - name: Sync Mods from Golden Image (Arch Machine)
       ansible.posix.synchronize:
         src: /home/daniel/server-golden-image/mods/
