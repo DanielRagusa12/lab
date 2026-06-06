@@ -150,12 +150,15 @@ resource "proxmox_virtual_environment_vm" "microservice_host" {
   name      = "microservice-host"
   node_name = "pve"
   vm_id     = 200
+  lifecycle {
+    prevent_destroy = true
+  }
   agent { enabled = true }
   cpu {
-    cores = 2
+    cores = 4
     type  = "host"
   }
-  memory { dedicated = 4096 }
+  memory { dedicated = 8192 }
   initialization {
     user_data_file_id = proxmox_virtual_environment_file.microservice_user_data_config.id
     datastore_id      = "local-zfs"
@@ -169,7 +172,7 @@ resource "proxmox_virtual_environment_vm" "microservice_host" {
   disk {
     datastore_id = "local-zfs"
     interface    = "scsi0"
-    size         = 32
+    size         = 64
     file_format  = "raw"
     file_id      = proxmox_virtual_environment_download_file.ubuntu_cloud_image.id
   }
