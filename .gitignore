@@ -19,5 +19,6 @@ vault.yml
 .idea/
 *.log
 
-skin-scraper/
+float-oracle/
 AGENTS.md
+*.tex

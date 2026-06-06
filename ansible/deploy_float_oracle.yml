@@ -1,0 +1,152 @@
+---
+- name: Deploy Float Oracle
+  hosts: microservice_host
+  become: true
+
+  vars:
+    float_oracle_remote_path: /opt/float-oracle
+    float_oracle_local_path: /home/daniel/lab/float-oracle/
+    float_oracle_lock_file: /opt/float-oracle/.deploy-scrape.lock
+    float_oracle_seed_db_path: /tmp/float-oracle-seed-oracle.db
+    float_oracle_seed_database: false
+
+  tasks:
+    - name: Install host packages required by Float Oracle
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - cron
+          - gzip
+          - rclone
+          - rsync
+          - sqlite3
+          - util-linux
+        state: present
+
+    - name: Create Float Oracle directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+      loop:
+        - "{{ float_oracle_remote_path }}"
+        - "{{ float_oracle_remote_path }}/data"
+        - "{{ float_oracle_remote_path }}/logs"
+
+    - name: Create Float Oracle deploy and scrape lock file
+      ansible.builtin.file:
+        path: "{{ float_oracle_lock_file }}"
+        state: touch
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Check whether remote oracle database already exists
+      ansible.builtin.stat:
+        path: "{{ float_oracle_remote_path }}/data/oracle.db"
+      register: float_oracle_remote_db
+
+    - name: Create local SQLite seed backup when explicitly requested
+      ansible.builtin.shell: |
+        rm -f {{ float_oracle_seed_db_path }}
+        sqlite3 {{ float_oracle_local_path }}data/oracle.db ".backup '{{ float_oracle_seed_db_path }}'"
+      args:
+        executable: /bin/bash
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      when:
+        - float_oracle_seed_database | bool
+        - not float_oracle_remote_db.stat.exists
+
+    - name: Seed oracle database from local backup when explicitly requested
+      ansible.builtin.copy:
+        src: "{{ float_oracle_seed_db_path }}"
+        dest: "{{ float_oracle_remote_path }}/data/oracle.db"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+      when:
+        - float_oracle_seed_database | bool
+        - not float_oracle_remote_db.stat.exists
+
+    - name: Remove local SQLite seed backup
+      ansible.builtin.file:
+        path: "{{ float_oracle_seed_db_path }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      when:
+        - float_oracle_seed_database | bool
+        - not float_oracle_remote_db.stat.exists
+
+    - name: Ship Float Oracle code to VM
+      ansible.posix.synchronize:
+        src: "{{ float_oracle_local_path }}"
+        dest: "{{ float_oracle_remote_path }}"
+        delete: true
+        recursive: true
+        rsync_path: "flock {{ float_oracle_lock_file }} rsync"
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=.env"
+          - "--exclude=.deploy-scrape.lock"
+          - "--exclude=.venv"
+          - "--exclude=.pytest_cache"
+          - "--exclude=__pycache__"
+          - "--exclude=*.pyc"
+          - "--exclude=data"
+          - "--exclude=logs"
+
+    - name: Copy Float Oracle environment file
+      ansible.builtin.copy:
+        src: "{{ float_oracle_local_path }}.env"
+        dest: "{{ float_oracle_remote_path }}/.env"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0600'
+      no_log: true
+
+    - name: Ensure script permissions
+      ansible.builtin.file:
+        path: "{{ float_oracle_remote_path }}/scripts/backup-db.sh"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Build Float Oracle Docker image under deploy lock
+      ansible.builtin.shell: |
+        flock {{ float_oracle_lock_file }} bash -lc 'cd {{ float_oracle_remote_path }} && docker compose build scraper'
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Validate Float Oracle snapshots under deploy lock
+      ansible.builtin.shell: |
+        flock {{ float_oracle_lock_file }} bash -lc 'cd {{ float_oracle_remote_path }} && docker compose run --rm scraper python -m app.main snapshots'
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Schedule Float Oracle scrape every two hours
+      ansible.builtin.cron:
+        name: Float Oracle Scrape
+        minute: '0'
+        hour: '*/2'
+        user: "{{ ansible_user }}"
+        job: >-
+          flock -n {{ float_oracle_lock_file }} bash -lc
+          'cd {{ float_oracle_remote_path }} && docker compose run --rm scraper >> logs/scrape.log 2>&1'
+
+    - name: Schedule Float Oracle daily backup
+      ansible.builtin.cron:
+        name: Float Oracle Backup
+        minute: '15'
+        hour: '3'
+        user: "{{ ansible_user }}"
+        job: >-
+          flock -n {{ float_oracle_lock_file }} bash -lc
+          'cd {{ float_oracle_remote_path }} && ./scripts/backup-db.sh >> logs/backup.log 2>&1'
