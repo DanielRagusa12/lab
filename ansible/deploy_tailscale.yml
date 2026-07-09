@@ -16,6 +16,14 @@
       no_log: true
 
   tasks:
+    - name: Validate Tailscale auth key is configured
+      ansible.builtin.assert:
+        that:
+          - ts_key is defined
+          - ts_key | length > 0
+        fail_msg: "Set ts_key in vault.yml or env.yml before running this playbook."
+      no_log: true
+
     - name: Enable IPv4 forwarding in the kernel
       ansible.posix.sysctl:
         name: net.ipv4.ip_forward
@@ -29,6 +37,7 @@
         name:
           - apt-transport-https
           - curl
+          - python3-debian
           - ufw
         state: present
         update_cache: true
@@ -45,11 +54,24 @@
         dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
         mode: '0644'
 
+    - name: Remove legacy Tailscale repository list
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/tailscale.list
+        state: absent
+
     - name: Add Tailscale repository
-      ansible.builtin.apt_repository:
-        repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main"
+      ansible.builtin.deb822_repository:
+        name: tailscale
+        types:
+          - deb
+        uris:
+          - https://pkgs.tailscale.com/stable/ubuntu
+        suites:
+          - noble
+        components:
+          - main
+        signed_by: /usr/share/keyrings/tailscale-archive-keyring.gpg
         state: present
-        filename: tailscale
 
     - name: Install Tailscale
       ansible.builtin.apt:
@@ -90,15 +112,37 @@
       failed_when: false
       changed_when: false
 
-    - name: Bring Tailscale Up
-      ansible.builtin.command:
-        cmd: >
-          tailscale up
-          --reset
-          --authkey={{ ts_key }}
-          --hostname="lxc-subnet-router"
-          --advertise-routes="192.168.1.0/24"
-          --accept-dns=false
-      when: "'Running' not in (ts_status.stdout | from_json).BackendState"
-      changed_when: true
-      no_log: true
+    - name: Parse Tailscale backend state
+      ansible.builtin.set_fact:
+        ts_backend_state: "{{ (ts_status.stdout | from_json).BackendState | default('Unknown') }}"
+      when: ts_status.rc == 0 and ts_status.stdout | length > 0
+
+    - name: Bring Tailscale up
+      when: ts_backend_state | default('Unknown') != 'Running'
+      block:
+        - name: Run tailscale up
+          ansible.builtin.command:
+            argv:
+              - tailscale
+              - up
+              - --reset
+              - "--authkey={{ ts_key }}"
+              - --hostname=lxc-subnet-router
+              - --advertise-routes=192.168.1.0/24
+              - --snat-subnet-routes=true
+              - --accept-dns=false
+          register: ts_up
+          changed_when: true
+          no_log: true
+
+      rescue:
+        - name: Check Tailscale health after failed login
+          ansible.builtin.command: tailscale status --json
+          register: ts_failed_status
+          failed_when: false
+          changed_when: false
+
+        - name: Report Tailscale login failure
+          ansible.builtin.fail:
+            msg: >-
+              tailscale up failed. Health: {{ ((ts_failed_status.stdout | from_json).Health | default(['No health details returned'])) | join('; ') }}

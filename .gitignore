@@ -20,5 +20,6 @@ vault.yml
 *.log
 
 float-oracle/
+float-sniper/
 AGENTS.md
 *.tex

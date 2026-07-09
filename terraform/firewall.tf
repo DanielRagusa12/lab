@@ -16,7 +16,7 @@ resource "proxmox_virtual_environment_cluster_firewall_security_group" "web_traf
 
 resource "proxmox_virtual_environment_cluster_firewall_security_group" "management" {
   name    = "my_management"
-  comment = "Allow SSH and ICMP ONLY from workstation"
+  comment = "Allow SSH and ICMP from workstation and VPN gateway"
 
   rule {
     type    = "in"
@@ -33,6 +33,23 @@ resource "proxmox_virtual_environment_cluster_firewall_security_group" "manageme
     proto   = "icmp"
     source  = var.workstation_ipv4_address
     comment = "Workstation Ping Access"
+  }
+
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "22"
+    source  = split("/", var.vpn_lxc_ipv4_address)[0]
+    comment = "VPN Gateway SSH Access"
+  }
+
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "icmp"
+    source  = split("/", var.vpn_lxc_ipv4_address)[0]
+    comment = "VPN Gateway Ping Access"
   }
 }
 
