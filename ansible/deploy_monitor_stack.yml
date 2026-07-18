@@ -1,0 +1,49 @@
+---
+- name: Deploy Monitor Stack
+  hosts: microservice_host
+  become: true
+
+  vars:
+    monitor_stack_remote_path: /opt/monitor-stack
+    monitor_stack_local_path: /home/daniel/lab/monitor-stack/
+
+  tasks:
+    - name: Install host packages required by Monitor Stack
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - rsync
+        state: present
+
+    - name: Create Monitor Stack directory
+      ansible.builtin.file:
+        path: "{{ monitor_stack_remote_path }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Ship Monitor Stack files to VM
+      ansible.posix.synchronize:
+        src: "{{ monitor_stack_local_path }}"
+        dest: "{{ monitor_stack_remote_path }}"
+        delete: true
+        recursive: true
+        rsync_opts:
+          - "--exclude=.git"
+      become: false
+
+    - name: Ensure Monitor Stack files are owned by deploy user
+      ansible.builtin.file:
+        path: "{{ monitor_stack_remote_path }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        recurse: true
+
+    - name: Start Monitor Stack
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ monitor_stack_remote_path }}"
+      become_user: "{{ ansible_user }}"
+      changed_when: true
