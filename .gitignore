@@ -21,6 +21,7 @@ vault.yml
 
 float-oracle/
 float-sniper/
+skinport-agent/
 monitor-stack/
 AGENTS.md
 *.tex
