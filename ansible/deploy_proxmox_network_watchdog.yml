@@ -1,0 +1,121 @@
+---
+- name: Deploy Proxmox Network Watchdog
+  hosts: proxmox
+  become: true
+
+  vars:
+    watchdog_gateway: 192.168.1.1
+    watchdog_targets:
+      - 1.1.1.1
+      - 8.8.8.8
+    watchdog_failure_threshold: 5
+    watchdog_min_uptime_seconds: 300
+    watchdog_state_dir: /var/lib/network-watchdog
+    watchdog_script_path: /usr/local/sbin/network-watchdog.sh
+
+  tasks:
+    - name: Create watchdog state directory
+      ansible.builtin.file:
+        path: "{{ watchdog_state_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install network watchdog script
+      ansible.builtin.copy:
+        dest: "{{ watchdog_script_path }}"
+        owner: root
+        group: root
+        mode: '0755'
+        content: |
+          #!/bin/sh
+          set -eu
+
+          GATEWAY={{ watchdog_gateway }}
+          TARGETS="{{ watchdog_targets | join(' ') }}"
+          THRESHOLD={{ watchdog_failure_threshold }}
+          MIN_UPTIME_SECONDS={{ watchdog_min_uptime_seconds }}
+          STATE_DIR={{ watchdog_state_dir }}
+          FAIL_COUNT_FILE="$STATE_DIR/fail-count"
+
+          uptime_seconds="$(cut -d. -f1 /proc/uptime)"
+          if [ "$uptime_seconds" -lt "$MIN_UPTIME_SECONDS" ]; then
+            exit 0
+          fi
+
+          if ping -c 1 -W 3 "$GATEWAY" >/dev/null 2>&1; then
+            printf '0\n' > "$FAIL_COUNT_FILE"
+            exit 0
+          fi
+
+          for target in $TARGETS; do
+            if ping -c 1 -W 3 "$target" >/dev/null 2>&1; then
+              printf '0\n' > "$FAIL_COUNT_FILE"
+              exit 0
+            fi
+          done
+
+          fail_count=0
+          if [ -f "$FAIL_COUNT_FILE" ]; then
+            fail_count="$(cat "$FAIL_COUNT_FILE")"
+          fi
+
+          case "$fail_count" in
+            ''|*[!0-9]*) fail_count=0 ;;
+          esac
+
+          fail_count=$((fail_count + 1))
+          printf '%s\n' "$fail_count" > "$FAIL_COUNT_FILE"
+
+          logger -t network-watchdog "network check failed $fail_count/$THRESHOLD; gateway: $GATEWAY; targets: $TARGETS"
+
+          if [ "$fail_count" -ge "$THRESHOLD" ]; then
+            logger -t network-watchdog "gateway and external targets unreachable for $fail_count consecutive checks, rebooting"
+            systemctl reboot
+          fi
+
+    - name: Install network watchdog service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/network-watchdog.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Check network reachability and reboot after sustained failure
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart={{ watchdog_script_path }}
+
+    - name: Install network watchdog timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/network-watchdog.timer
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Run network watchdog every minute
+
+          [Timer]
+          OnBootSec=5min
+          OnUnitActiveSec=1min
+          AccuracySec=10s
+          Unit=network-watchdog.service
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and start network watchdog timer
+      ansible.builtin.systemd:
+        name: network-watchdog.timer
+        enabled: true
+        state: started
