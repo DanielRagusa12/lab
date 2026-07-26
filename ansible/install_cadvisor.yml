@@ -1,0 +1,33 @@
+---
+- name: Install cAdvisor
+  hosts: microservice_host:game_server
+  become: true
+
+  vars:
+    cadvisor_image: gcr.io/cadvisor/cadvisor:v0.55.1
+
+  tasks:
+    - name: Run cAdvisor container
+      community.docker.docker_container:
+        name: cadvisor
+        image: "{{ cadvisor_image }}"
+        state: started
+        restart_policy: unless-stopped
+        privileged: true
+        pull: true
+        devices:
+          - /dev/kmsg:/dev/kmsg
+        published_ports:
+          - "8080:8080"
+        volumes:
+          - /:/rootfs:ro
+          - /var/run:/var/run:ro
+          - /sys:/sys:ro
+          - /var/lib/docker:/var/lib/docker:ro
+          - /dev/disk:/dev/disk:ro
+
+    - name: Verify cAdvisor metrics endpoint locally
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/metrics
+        status_code: 200
+        return_content: false

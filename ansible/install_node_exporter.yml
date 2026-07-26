@@ -1,0 +1,43 @@
+---
+- name: Install Node Exporter
+  hosts: all:!monitor_server:!proxmox
+  become: true
+
+  tasks:
+    - name: Install prometheus-node-exporter package
+      ansible.builtin.apt:
+        name: prometheus-node-exporter
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Enable and start node exporter
+      ansible.builtin.service:
+        name: prometheus-node-exporter
+        state: started
+        enabled: true
+
+    - name: Check UFW status
+      ansible.builtin.command: ufw status
+      register: node_exporter_ufw_status
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname == 'vpn_gateway'
+
+    - name: Allow node exporter scrapes through UFW
+      ansible.builtin.command: >-
+        ufw allow from {{ hostvars['monitor_server'].ansible_host }}
+        to any port 9100 proto tcp
+        comment 'Allow node exporter scrape from monitor server'
+      register: node_exporter_ufw_allow
+      changed_when: "'Rule added' in node_exporter_ufw_allow.stdout"
+      when:
+        - inventory_hostname == 'vpn_gateway'
+        - node_exporter_ufw_status.rc == 0
+        - "'Status: active' in node_exporter_ufw_status.stdout"
+
+    - name: Verify node exporter metrics endpoint locally
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9100/metrics
+        status_code: 200
+        return_content: false

@@ -64,6 +64,34 @@ resource "proxmox_virtual_environment_cluster_firewall_security_group" "monitori
   }
 }
 
+resource "proxmox_virtual_environment_cluster_firewall_security_group" "node_exporter" {
+  name    = "node-exporter"
+  comment = "Allow Prometheus scrapes from monitor server"
+
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "9100"
+    source  = split("/", var.monitor_lxc_ipv4_address)[0]
+    comment = "Allow node exporter scrape from monitor server"
+  }
+}
+
+resource "proxmox_virtual_environment_cluster_firewall_security_group" "cadvisor" {
+  name    = "cadvisor"
+  comment = "Allow cAdvisor scrapes from monitor server"
+
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "8080"
+    source  = split("/", var.monitor_lxc_ipv4_address)[0]
+    comment = "Allow cAdvisor scrape from monitor server"
+  }
+}
+
 # Rules applied to the physical Proxmox Node (Host)
 resource "proxmox_virtual_environment_firewall_rules" "pve_host_fw" {
   node_name = "pve" # Your actual Proxmox node name
@@ -86,6 +114,11 @@ resource "proxmox_virtual_environment_firewall_rules" "vpn_fw" {
     security_group = proxmox_virtual_environment_cluster_firewall_security_group.management.name
     enabled        = true
   }
+  rule {
+    security_group = proxmox_virtual_environment_cluster_firewall_security_group.node_exporter.name
+    enabled        = true
+  }
+
 }
 
 # Cloudflare Tunnel (ID 101)
@@ -96,6 +129,11 @@ resource "proxmox_virtual_environment_firewall_rules" "cloudflare_fw" {
     security_group = proxmox_virtual_environment_cluster_firewall_security_group.management.name
     enabled        = true
   }
+  rule {
+    security_group = proxmox_virtual_environment_cluster_firewall_security_group.node_exporter.name
+    enabled        = true
+  }
+
 }
 
 # Playit Client (ID 102)
@@ -115,6 +153,12 @@ resource "proxmox_virtual_environment_firewall_rules" "playit_fw" {
     source  = split("/", var.game_vm_ipv4_address)[0]
     comment = "Allow Minecraft bridge traffic from Game Server"
   }
+
+  rule {
+    security_group = proxmox_virtual_environment_cluster_firewall_security_group.node_exporter.name
+    enabled        = true
+  }
+
 }
 
 # Monitor Server (ID 103)
@@ -147,6 +191,16 @@ resource "proxmox_virtual_environment_firewall_rules" "ms_host_fw" {
     dport   = "5000"
     source  = split("/", var.tunnel_lxc_ipv4_address)[0]
     comment = "Allow Cloudflare Tunnel to dashboard endpoint"
+  }
+
+  rule {
+    security_group = proxmox_virtual_environment_cluster_firewall_security_group.node_exporter.name
+    enabled        = true
+  }
+
+  rule {
+    security_group = proxmox_virtual_environment_cluster_firewall_security_group.cadvisor.name
+    enabled        = true
   }
 }
 
@@ -226,6 +280,16 @@ resource "proxmox_virtual_environment_firewall_rules" "game_server_fw" {
     dport   = "9001"
     source  = split("/", var.ms_vm_ipv4_address)[0]
     comment = "Allow Portainer Agent Monitoring"
+  }
+
+  rule {
+    security_group = proxmox_virtual_environment_cluster_firewall_security_group.node_exporter.name
+    enabled        = true
+  }
+
+  rule {
+    security_group = proxmox_virtual_environment_cluster_firewall_security_group.cadvisor.name
+    enabled        = true
   }
 }
 
