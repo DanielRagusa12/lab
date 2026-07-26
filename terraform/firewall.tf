@@ -2,18 +2,6 @@
 #  FIREWALL ATTACHMENTS & OPTIONS
 # =============================================================================
 
-resource "proxmox_virtual_environment_cluster_firewall_security_group" "web_traffic" {
-  name    = "web-traffic"
-  comment = "Allow HTTP and HTTPS"
-  rule {
-    type    = "in"
-    action  = "ACCEPT"
-    proto   = "tcp"
-    dport   = "80,443"
-    comment = "Allow web traffic"
-  }
-}
-
 resource "proxmox_virtual_environment_cluster_firewall_security_group" "management" {
   name    = "my_management"
   comment = "Allow SSH and ICMP from workstation and VPN gateway"
@@ -50,6 +38,29 @@ resource "proxmox_virtual_environment_cluster_firewall_security_group" "manageme
     proto   = "icmp"
     source  = split("/", var.vpn_lxc_ipv4_address)[0]
     comment = "VPN Gateway Ping Access"
+  }
+}
+
+resource "proxmox_virtual_environment_cluster_firewall_security_group" "monitoring" {
+  name    = "monitoring"
+  comment = "Allow monitoring UIs from workstation and VPN gateway"
+
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "3000,9090,9093"
+    source  = var.workstation_ipv4_address
+    comment = "Workstation monitoring access"
+  }
+
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "3000,9090,9093"
+    source  = split("/", var.vpn_lxc_ipv4_address)[0]
+    comment = "VPN Gateway monitoring access"
   }
 }
 
@@ -106,8 +117,8 @@ resource "proxmox_virtual_environment_firewall_rules" "playit_fw" {
   }
 }
 
-# NGINX Proxy (ID 103)
-resource "proxmox_virtual_environment_firewall_rules" "nginx_fw" {
+# Monitor Server (ID 103)
+resource "proxmox_virtual_environment_firewall_rules" "monitor_fw" {
   node_name    = "pve"
   container_id = 103
   rule {
@@ -115,7 +126,7 @@ resource "proxmox_virtual_environment_firewall_rules" "nginx_fw" {
     enabled        = true
   }
   rule {
-    security_group = proxmox_virtual_environment_cluster_firewall_security_group.web_traffic.name
+    security_group = proxmox_virtual_environment_cluster_firewall_security_group.monitoring.name
     enabled        = true
   }
 }
@@ -240,7 +251,7 @@ resource "proxmox_virtual_environment_firewall_options" "playit_opts" {
   input_policy = "DROP"
 }
 
-resource "proxmox_virtual_environment_firewall_options" "nginx_opts" {
+resource "proxmox_virtual_environment_firewall_options" "monitor_opts" {
   node_name    = "pve"
   container_id = 103
   enabled      = true

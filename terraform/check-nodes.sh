@@ -5,7 +5,7 @@ NODES=(
     "VPN Gateway|192.168.1.14"
     "Cloudflared|192.168.1.15"
     "Playit Client|192.168.1.17"
-    "NGINX Proxy|192.168.1.18"
+    "Monitor Server|192.168.1.18"
     "Microservice|192.168.1.13"
     "Game Server|192.168.1.16"
 )

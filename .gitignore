@@ -23,5 +23,6 @@ float-oracle/
 float-sniper/
 skinport-agent/
 monitor-stack/
+issues/
 AGENTS.md
 *.tex

@@ -110,20 +110,20 @@ resource "proxmox_virtual_environment_container" "playit_client" {
   }
 }
 
-# --- Frontend / Proxy ---
-resource "proxmox_virtual_environment_container" "nginx_proxy" {
+# --- Monitoring ---
+resource "proxmox_virtual_environment_container" "monitor_server" {
   node_name    = "pve"
   vm_id        = 103
   unprivileged = true
   initialization {
-    hostname = "nginx-proxy"
+    hostname = "monitor-server"
     user_account {
-      password = var.nginx_lxc_password
+      password = var.monitor_lxc_password
       keys     = [trimspace(file("~/.ssh/proxmox.pub"))]
     }
     ip_config {
       ipv4 {
-        address = var.nginx_lxc_ipv4_address
+        address = var.monitor_lxc_ipv4_address
         gateway = var.ipv4_gateway
       }
     }

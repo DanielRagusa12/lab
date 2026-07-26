@@ -1,5 +1,0 @@
-*.tfvars
-*.hcl
-*.tfstate
-*.backup
-ansible/env.yml
