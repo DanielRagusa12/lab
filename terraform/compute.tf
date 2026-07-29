@@ -138,7 +138,8 @@ resource "proxmox_virtual_environment_container" "monitor_server" {
     type             = "ubuntu"
   }
   features { nesting = true }
-  memory { dedicated = 512 }
+  cpu { cores = 2 }
+  memory { dedicated = 2048 }
   disk {
     datastore_id = "local-zfs"
     size         = 8
@@ -158,7 +159,7 @@ resource "proxmox_virtual_environment_vm" "microservice_host" {
     cores = 4
     type  = "host"
   }
-  memory { dedicated = 8192 }
+  memory { dedicated = 12288 }
   initialization {
     user_data_file_id = proxmox_virtual_environment_file.microservice_user_data_config.id
     datastore_id      = "local-zfs"
@@ -188,11 +189,11 @@ resource "proxmox_virtual_environment_vm" "game_server" {
   node_name = "pve"
   vm_id     = 201
   cpu {
-    cores = 4
+    cores = 3
     type  = "host"
   }
   scsi_hardware = "virtio-scsi-pci"
-  memory { dedicated = 18432 }
+  memory { dedicated = 12800 }
   serial_device {}
   vga { type = "serial0" }
   agent {
