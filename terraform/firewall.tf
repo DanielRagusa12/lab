@@ -194,6 +194,15 @@ resource "proxmox_virtual_environment_firewall_rules" "ms_host_fw" {
   }
 
   rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "5902,5903"
+    source  = var.workstation_ipv4_address
+    comment = "Allow VNC from Dev Workstation"
+  }
+
+  rule {
     security_group = proxmox_virtual_environment_cluster_firewall_security_group.node_exporter.name
     enabled        = true
   }
