@@ -11,7 +11,7 @@ resource "proxmox_virtual_environment_container" "vpn_gateway" {
     hostname = "vpn-gateway"
     user_account {
       password = var.vpn_lxc_password
-      keys     = [trimspace(file("~/.ssh/proxmox.pub"))]
+      keys     = [trimspace(file(pathexpand("~/.ssh/proxmox.pub")))]
     }
     ip_config {
       ipv4 {
@@ -49,7 +49,7 @@ resource "proxmox_virtual_environment_container" "cloudflare_tunnel" {
     hostname = "cloudflared"
     user_account {
       password = var.tunnel_lxc_password
-      keys     = [trimspace(file("~/.ssh/proxmox.pub"))]
+      keys     = [trimspace(file(pathexpand("~/.ssh/proxmox.pub")))]
     }
     ip_config {
       ipv4 {
@@ -83,7 +83,7 @@ resource "proxmox_virtual_environment_container" "playit_client" {
     hostname = "playit-client"
     user_account {
       password = var.playit_lxc_password
-      keys     = [trimspace(file("~/.ssh/proxmox.pub"))]
+      keys     = [trimspace(file(pathexpand("~/.ssh/proxmox.pub")))]
     }
     ip_config {
       ipv4 {
@@ -119,7 +119,7 @@ resource "proxmox_virtual_environment_container" "monitor_server" {
     hostname = "monitor-server"
     user_account {
       password = var.monitor_lxc_password
-      keys     = [trimspace(file("~/.ssh/proxmox.pub"))]
+      keys     = [trimspace(file(pathexpand("~/.ssh/proxmox.pub")))]
     }
     ip_config {
       ipv4 {

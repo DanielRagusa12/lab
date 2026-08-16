@@ -212,6 +212,15 @@ resource "proxmox_virtual_environment_firewall_rules" "ms_host_fw" {
   }
 
   rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "tcp"
+    dport   = "6969"
+    source  = split("/", var.vpn_lxc_ipv4_address)[0]
+    comment = "Allow web application from Tailscale LXC"
+  }
+
+  rule {
     security_group = proxmox_virtual_environment_cluster_firewall_security_group.node_exporter.name
     enabled        = true
   }

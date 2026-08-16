@@ -40,7 +40,7 @@ resource "proxmox_virtual_environment_file" "microservice_user_data_config" {
     data = templatefile("${path.module}/host-init-ms.tftpl", {
       hostname = "microservice-host"
       username = "ubuntu"
-      ssh_key  = trimspace(file("~/.ssh/proxmox.pub"))
+      ssh_key  = trimspace(file(pathexpand("~/.ssh/proxmox.pub")))
     })
   }
 }
@@ -54,7 +54,7 @@ resource "proxmox_virtual_environment_file" "gameserver_user_data_config" {
     data = templatefile("${path.module}/host-init-mc.tftpl", {
       hostname = "game-server"
       username = "debian"
-      ssh_key  = trimspace(file("~/.ssh/proxmox.pub"))
+      ssh_key  = trimspace(file(pathexpand("~/.ssh/proxmox.pub")))
     })
   }
 }
