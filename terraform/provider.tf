@@ -2,6 +2,14 @@
 #  TERRAFORM & PROVIDER CONFIGURATION
 # =============================================================================
 terraform {
+  cloud {
+    organization = "daniel-home-lab"
+
+    workspaces {
+      name = "proxmox-home-lab"
+    }
+  }
+
   required_providers {
     cloudflare = {
       source  = "cloudflare/cloudflare"
