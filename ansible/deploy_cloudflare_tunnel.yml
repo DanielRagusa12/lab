@@ -58,6 +58,29 @@
         state: present
         update_cache: true
 
+    - name: Create cloudflared configuration directory
+      ansible.builtin.file:
+        path: /etc/cloudflared
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Store the tunnel token for the systemd service
+      ansible.builtin.copy:
+        content: "{{ cloudflare_tunnel_token }}\n"
+        dest: /etc/cloudflared/token
+        owner: root
+        group: root
+        mode: '0600'
+      notify: Restart cloudflared
+      no_log: true
+
+    - name: Remove the unused legacy token environment file
+      ansible.builtin.file:
+        path: /etc/default/cloudflared
+        state: absent
+
     - name: Check whether cloudflared service unit exists
       ansible.builtin.stat:
         path: /etc/systemd/system/cloudflared.service
@@ -70,17 +93,8 @@
       changed_when: true
       no_log: true
 
-    - name: Ensure tunnel token is stored in /etc/default/cloudflared
-      ansible.builtin.lineinfile:
-        path: /etc/default/cloudflared
-        regexp: '^TUNNEL_TOKEN='
-        line: "TUNNEL_TOKEN={{ cloudflare_tunnel_token }}"
-        create: true
-        owner: root
-        group: root
-        mode: '0600'
-      notify: Restart cloudflared
-      no_log: true
+    - name: Apply token changes before service verification
+      ansible.builtin.meta: flush_handlers
 
     - name: Enable and start cloudflared
       ansible.builtin.systemd:
@@ -94,13 +108,15 @@
         cmd: systemctl is-active cloudflared
       register: cloudflared_status
       changed_when: false
-      failed_when: cloudflared_status.stdout != "active"
+      retries: 6
+      delay: 5
+      until: cloudflared_status.stdout == "active"
 
     - name: Print deployment summary
       ansible.builtin.debug:
         msg:
           - "cloudflared service state: {{ cloudflared_status.stdout }}"
-          - "Tunnel token source: /etc/default/cloudflared"
+          - "Tunnel token source: /etc/cloudflared/token"
 
   handlers:
     - name: Restart cloudflared

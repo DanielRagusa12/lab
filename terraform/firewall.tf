@@ -188,9 +188,9 @@ resource "proxmox_virtual_environment_firewall_rules" "ms_host_fw" {
     type    = "in"
     action  = "ACCEPT"
     proto   = "tcp"
-    dport   = "5000"
+    dport   = "6969"
     source  = split("/", var.tunnel_lxc_ipv4_address)[0]
-    comment = "Allow Cloudflare Tunnel to dashboard endpoint"
+    comment = "Allow Cloudflare Tunnel lxc to dashboard endpoint on ms host"
   }
 
   rule {
