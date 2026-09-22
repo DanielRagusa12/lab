@@ -156,7 +156,7 @@ resource "proxmox_virtual_environment_vm" "microservice_host" {
   }
   agent { enabled = true }
   cpu {
-    cores = 4
+    cores = 8
     type  = "host"
   }
   memory { dedicated = 12288 }
@@ -173,7 +173,7 @@ resource "proxmox_virtual_environment_vm" "microservice_host" {
   disk {
     datastore_id = "local-zfs"
     interface    = "scsi0"
-    size         = 64
+    size         = 128
     file_format  = "raw"
     file_id      = proxmox_virtual_environment_download_file.ubuntu_cloud_image.id
   }
