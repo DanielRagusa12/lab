@@ -19,11 +19,8 @@ vault.yml
 .idea/
 *.log
 
-float-oracle/
-float-sniper/
-skinport-agent/
+float/
 monitor-stack/
-steam-trade-auto-accept/
 issues/
 AGENTS.md
 *.tex
