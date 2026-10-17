@@ -1,0 +1,116 @@
+---
+- name: Configure a dedicated headless Mac browser worker
+  hosts: macos
+  gather_facts: true
+  vars_files:
+    - vault.yml
+
+  # No launchctl service blacklist, SIP changes, package installation,
+  # cache deletion, firewall changes, or automatic reboot.
+  vars:
+    ansible_become_password: "{{ vault_mac_mini_become_password }}"
+    mac_power_settings:
+      - {key: sleep, value: 0}
+      - {key: powernap, value: 0}
+      - {key: disksleep, value: 0}
+      - {key: displaysleep, value: 10}
+
+  pre_tasks:
+    - name: Require a nonempty vault_mac_mini_become_password in vault.yml
+      ansible.builtin.assert:
+        that:
+          - vault_mac_mini_become_password is defined
+          - vault_mac_mini_become_password is string
+          - vault_mac_mini_become_password | length > 0
+        fail_msg: Fill in vault_mac_mini_become_password locally before running.
+      no_log: true
+
+  tasks:
+    - name: Require macOS
+      ansible.builtin.assert:
+        that: ansible_facts.system == 'Darwin'
+        fail_msg: This playbook is only for macOS.
+
+    - name: Read System Integrity Protection status
+      ansible.builtin.command: /usr/bin/csrutil status
+      register: mac_sip
+      changed_when: false
+      check_mode: false
+
+    - name: Require System Integrity Protection to remain enabled
+      ansible.builtin.assert:
+        that: "'System Integrity Protection status: enabled.' in mac_sip.stdout"
+        fail_msg: SIP is not fully enabled. Review locally before proceeding.
+
+    - name: Read current power settings
+      ansible.builtin.command: /usr/bin/pmset -g custom
+      register: mac_power
+      changed_when: false
+      check_mode: false
+
+    - name: Require the expected desktop power settings
+      ansible.builtin.assert:
+        that: mac_power.stdout is search('(?m)^\\s*' ~ item.key ~ '\\s+\\d+')
+        fail_msg: "Power setting {{ item.key }} is unsupported. Review before applying."
+      loop: "{{ mac_power_settings }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Configure only power settings that differ
+      become: true
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/pmset
+          - -c
+          - "{{ item.key }}"
+          - "{{ item.value | string }}"
+      when: mac_power.stdout is not search('(?m)^\s*' ~ item.key ~ '\s+' ~ (item.value | string) ~ '\s*$')
+      loop: "{{ mac_power_settings }}"
+      loop_control:
+        label: "{{ item.key }}={{ item.value }}"
+      changed_when: true
+
+    - name: Read remote Apple Events status
+      become: true
+      ansible.builtin.command: /usr/sbin/systemsetup -getremoteappleevents
+      register: mac_remote_events
+      changed_when: false
+      check_mode: false
+
+    - name: Require a valid remote Apple Events response
+      ansible.builtin.assert:
+        that: mac_remote_events.stdout is search('Remote Apple Events:\s*(On|Off)')
+        fail_msg: "Could not read remote Apple Events status: {{ mac_remote_events.stdout }}"
+
+    - name: Disable remote Apple Events when enabled
+      become: true
+      ansible.builtin.command: /usr/sbin/systemsetup -setremoteappleevents off
+      when: mac_remote_events.stdout is search('Remote Apple Events:\s*On')
+      changed_when: true
+
+    - name: Read printer sharing configuration
+      ansible.builtin.command: /usr/sbin/cupsctl
+      register: mac_cups
+      changed_when: false
+      check_mode: false
+
+    - name: Require a valid printer sharing response
+      ansible.builtin.assert:
+        that: mac_cups.stdout is search('(?m)^_share_printers=[01]$')
+        fail_msg: Could not determine printer sharing state.
+
+    - name: Disable printer sharing when enabled
+      become: true
+      ansible.builtin.command: /usr/sbin/cupsctl --no-share-printers
+      when: "'_share_printers=1' in mac_cups.stdout"
+      changed_when: true
+
+    - name: Report settings deliberately left unchanged
+      ansible.builtin.debug:
+        msg:
+          - SSH, Screen Sharing/VNC, SIP, FileVault, firewall, and updates are unchanged.
+          - Power-on-after-outage settings are unchanged; test physical power restoration separately.
+          - Disable Siri and Apple Intelligence through System Settings if unused.
+          - Turn off optional analytics sharing in Privacy & Security > Analytics & Improvements.
+          - Review General > Login Items & Extensions and remove only known unused items.
+          - This does not disable printing locally, delete files, or install a persistence daemon.

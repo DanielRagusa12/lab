@@ -1,6 +1,6 @@
 ---
 - name: Production Deployment - Discord Music Bot
-  hosts: microservice_host
+  hosts: microservice_host:!macos
   become: true
 
   pre_tasks:

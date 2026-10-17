@@ -1,6 +1,6 @@
 ---
 - name: Deploy Minecraft Server (Robust Restic Edition)
-  hosts: game_server
+  hosts: game_server:!macos
   become: true
 
   pre_tasks:

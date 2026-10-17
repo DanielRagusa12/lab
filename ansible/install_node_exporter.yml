@@ -1,6 +1,6 @@
 ---
 - name: Install Node Exporter
-  hosts: all:!monitor_server:!proxmox
+  hosts: infrastructure:workloads:!monitor_server:!proxmox:!macos
   become: true
 
   tasks:

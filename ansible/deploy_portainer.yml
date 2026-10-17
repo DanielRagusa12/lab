@@ -1,6 +1,6 @@
 ---
 - name: Deploy Portainer Dashboard
-  hosts: microservice_host
+  hosts: microservice_host:!macos
   become: true
 
   tasks:

@@ -1,6 +1,6 @@
 ---
 - name: Install Playit Agent
-  hosts: playit_client
+  hosts: playit_client:!macos
   become: true
 
   tasks:

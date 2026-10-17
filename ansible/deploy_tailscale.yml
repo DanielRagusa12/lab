@@ -1,6 +1,6 @@
 ---
 - name: Deploy Tailscale Native Subnet Router and Harden Firewall
-  hosts: vpn_gateway
+  hosts: vpn_gateway:!macos
   become: true
 
   pre_tasks:

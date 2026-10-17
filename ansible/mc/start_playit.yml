@@ -1,6 +1,6 @@
 ---
 - name: Finalize Playit (Configure, Start, and Heartbeat)
-  hosts: playit_client
+  hosts: playit_client:!macos
   become: true
 
   tasks:

@@ -1,6 +1,6 @@
 ---
 - name: Install cAdvisor
-  hosts: microservice_host:game_server
+  hosts: microservice_host:game_server:!macos
   become: true
 
   vars:

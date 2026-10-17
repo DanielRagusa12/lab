@@ -17,6 +17,11 @@ all:
         proxmox:
           ansible_host: 192.168.1.12
           ansible_user: root
+    macos:
+      hosts:
+        mac_mini:
+          ansible_host: 192.168.1.20
+          ansible_user: macos
     workloads:
       hosts:
         microservice_host:

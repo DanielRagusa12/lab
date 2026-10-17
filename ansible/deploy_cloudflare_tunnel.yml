@@ -1,6 +1,6 @@
 ---
 - name: Deploy Cloudflare Tunnel Connector Service
-  hosts: cloudflare_tunnel
+  hosts: cloudflare_tunnel:!macos
   become: true
 
   pre_tasks:

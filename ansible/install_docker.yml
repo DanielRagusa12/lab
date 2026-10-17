@@ -1,6 +1,6 @@
 ---
 - name: Install Docker on Workload VMs
-  hosts: workloads
+  hosts: workloads:!macos
   become: true
   tasks:
     - name: Update apt cache and install dependencies

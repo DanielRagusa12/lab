@@ -1,6 +1,6 @@
 ---
 - name: Deploy Proxmox Network Watchdog
-  hosts: proxmox
+  hosts: proxmox:!macos
   become: true
 
   vars:
