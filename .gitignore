@@ -8,7 +8,6 @@
 terraform_debug.log
 
 # === Ansible ===
-env.yml
 vault.yml
 *.retry
 .vault_pass

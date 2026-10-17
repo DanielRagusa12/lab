@@ -5,14 +5,7 @@
 
   pre_tasks:
     - name: Load secret variables
-      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
-      vars:
-        params:
-          files:
-            - vault.yml
-            - env.yml
-          paths:
-            - "{{ playbook_dir }}"
+      ansible.builtin.include_vars: "{{ playbook_dir }}/vault.yml"
       no_log: true
 
   tasks:
@@ -21,7 +14,7 @@
         that:
           - ts_key is defined
           - ts_key | length > 0
-        fail_msg: "Set ts_key in vault.yml or env.yml before running this playbook."
+        fail_msg: "Set ts_key in vault.yml before running this playbook."
       no_log: true
 
     - name: Enable IPv4 forwarding in the kernel

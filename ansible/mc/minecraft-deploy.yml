@@ -5,14 +5,7 @@
 
   pre_tasks:
     - name: Load secret variables
-      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
-      vars:
-        params:
-          files:
-            - vault.yml
-            - env.yml
-          paths:
-            - "{{ playbook_dir }}"
+      ansible.builtin.include_vars: "{{ playbook_dir }}/../vault.yml"
       no_log: true
 
   vars:

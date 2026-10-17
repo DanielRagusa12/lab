@@ -5,14 +5,7 @@
 
   pre_tasks:
     - name: Load secret variables
-      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', params) }}"
-      vars:
-        params:
-          files:
-            - vault.yml
-            - env.yml
-          paths:
-            - "{{ playbook_dir }}"
+      ansible.builtin.include_vars: "{{ playbook_dir }}/vault.yml"
       no_log: true
 
     - name: Validate required tunnel token
@@ -21,7 +14,7 @@
           - cloudflare_tunnel_token is defined
           - cloudflare_tunnel_token | length > 0
         fail_msg: >-
-          Define cloudflare_tunnel_token in vault.yml or env.yml.
+          Define cloudflare_tunnel_token in vault.yml.
           This token can be copied from Cloudflare Zero Trust tunnel settings.
 
   tasks:
