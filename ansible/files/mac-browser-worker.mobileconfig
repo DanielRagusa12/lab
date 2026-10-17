@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadType</key><string>Configuration</string>
+  <key>PayloadVersion</key><integer>1</integer>
+  <key>PayloadIdentifier</key><string>org.homelab.mac-browser-worker</string>
+  <key>PayloadUUID</key><string>D6AB7D49-36DE-4EC0-A71F-576A7312F2A0</string>
+  <key>PayloadDisplayName</key><string>Homelab browser worker</string>
+  <key>PayloadDescription</key>
+  <string>Restricts Siri, selected Apple Intelligence features, automatic diagnostic submission, and personalized advertising. Does not delete models, change download servers, or restrict third-party MLX and Metal applications. Remove this profile to lift these restrictions.</string>
+  <key>PayloadOrganization</key><string>Homelab</string>
+  <key>PayloadScope</key><string>System</string>
+  <key>PayloadRemovalDisallowed</key><false/>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key><string>com.apple.applicationaccess</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>PayloadIdentifier</key><string>org.homelab.mac-browser-worker.restrictions</string>
+      <key>PayloadUUID</key><string>3866121D-44EB-471F-AE5D-2BC89E94FB35</string>
+      <key>PayloadDisplayName</key><string>Unused Apple features and privacy</string>
+      <!-- Apple schema 09f249a06e7e3289930bf6d05f38fb562f748ebf.
+           Siri/AI keys are deprecated since macOS 26.4, not marked removed.
+           Verify effectiveness after approval and macOS upgrades.
+           No asset overrides, private APIs, managed preference hacks,
+           service disabling, network restrictions, or ML runtime changes. -->
+      <key>allowAssistant</key><false/>
+      <key>allowWritingTools</key><false/>
+      <key>allowGenmoji</key><false/>
+      <key>allowImagePlayground</key><false/>
+      <key>allowExternalIntelligenceIntegrations</key><false/>
+      <key>allowMailSummary</key><false/>
+      <key>allowMailSmartReplies</key><false/>
+      <key>allowNotesTranscriptionSummary</key><false/>
+      <key>allowSafariSummary</key><false/>
+      <key>allowDiagnosticSubmission</key><false/>
+      <key>allowApplePersonalizedAdvertising</key><false/>
+    </dict>
+  </array>
+</dict>
+</plist>
