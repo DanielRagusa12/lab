@@ -77,6 +77,7 @@ Zero Trust management is feature-flagged with `enable_cloudflare_zero_trust` so 
 
 The `ansible/` directory contains playbooks for post-provisioning setup and service deployment:
 
+- [`update_guests.yml`](ansible/agent-docs/update-guests.md) previews or applies OS package updates on all inventoried LXC and VM guests, excluding Proxmox and macOS.
 - `install_docker.yml` installs Docker Engine and Compose support on workload VMs.
 - `deploy_tailscale.yml` configures the Tailscale subnet router, IP forwarding, and UFW hardening.
 - `deploy_cloudflare_tunnel.yml` installs and runs `cloudflared` as a system service.

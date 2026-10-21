@@ -1,0 +1,76 @@
+---
+- name: Preview or apply OS package updates on existing LXC and VM guests
+  hosts: infrastructure:workloads:!proxmox:!macos
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    guest_update_apply: false
+
+  pre_tasks:
+    - name: Require a supported Debian or Ubuntu guest
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] in ['Debian', 'Ubuntu']
+          - inventory_hostname != 'proxmox'
+        fail_msg: This playbook supports Debian and Ubuntu guests only, not the hypervisor.
+
+    - name: Check for Proxmox host configuration
+      ansible.builtin.stat:
+        path: /etc/pve
+      register: guest_update_pve
+
+    - name: Refuse to update a Proxmox host even if it has a guest inventory alias
+      ansible.builtin.assert:
+        that:
+          - not guest_update_pve.stat.exists
+        fail_msg: /etc/pve exists. Update the hypervisor separately.
+
+  tasks:
+    - name: Refresh APT package metadata
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
+        lock_timeout: 300
+
+    - name: Preview the full upgrade without changing installed packages
+      ansible.builtin.command:
+        argv:
+          - apt-get
+          - --simulate
+          - --no-remove
+          - dist-upgrade
+      environment:
+        LC_ALL: C
+      check_mode: false
+      changed_when: false
+      register: guest_update_plan
+
+    - name: Show the package update plan
+      ansible.builtin.debug:
+        var: guest_update_plan.stdout_lines
+
+    - name: Apply package updates without allowing package removals
+      ansible.builtin.apt:
+        upgrade: dist
+        fail_on_autoremove: true
+        force_apt_get: true
+        lock_timeout: 300
+      when: guest_update_apply | bool
+
+    - name: Check whether the guest reports a required reboot
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: guest_update_reboot
+
+    - name: Report update and reboot status
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          mode: "{{ 'apply' if guest_update_apply | bool and not ansible_check_mode else 'preview' }}"
+          reboot_required_marker: "{{ guest_update_reboot.stat.exists }}"
+          note: >-
+            No reboot is performed. The reboot marker is not available on every
+            Debian system. LXC guests share the Proxmox kernel, which must be
+            updated separately on the hypervisor.

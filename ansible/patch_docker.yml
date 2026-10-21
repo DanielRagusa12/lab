@@ -1,0 +1,41 @@
+---
+- name: Audit or explicitly patch existing Docker engines
+  hosts: all
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    docker_patch_apply: false
+    docker_patch_restart_approved: false
+    docker_patch_reviewed_packages: {}
+
+  tasks:
+    - name: Inspect local installation and enforce reviewed Docker CE patch policy
+      docker_security_patch:
+        apply: "{{ docker_patch_apply | bool }}"
+        restart_approved: "{{ docker_patch_restart_approved | bool }}"
+        reviewed_packages: "{{ docker_patch_reviewed_packages.get(inventory_hostname, {}) }}"
+      # No sudo on macOS, where Desktop or CLI-only installs are audit-only.
+      become: "{{ inventory_hostname not in groups.get('macos', []) }}"
+      register: docker_patch_result
+      no_log: true
+      ignore_errors: true
+
+    - name: Report only installation and patch status
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          os: "{{ docker_patch_result.os | default('unknown') }}"
+          method: "{{ docker_patch_result.method | default('unknown') }}"
+          status: "{{ docker_patch_result.status | default('inspection_failed') }}"
+          active: "{{ docker_patch_result.active | default(false) }}"
+          binary_version: "{{ docker_patch_result.binary_version | default('none') }}"
+          daemon_version: "{{ docker_patch_result.daemon_version | default('not_verified') }}"
+          packages: "{{ docker_patch_result.packages | default({}) }}"
+          plan: "{{ docker_patch_result.plan | default([]) }}"
+          blocker: "{{ docker_patch_result.msg | default('none') }}"
+
+    - name: Stop rollout on unsupported installation or failed verification
+      ansible.builtin.fail:
+        msg: "Docker patch blocked on {{ inventory_hostname }}; see sanitized status above."
+      when: docker_patch_result is failed

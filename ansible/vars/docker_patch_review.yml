@@ -1,0 +1,42 @@
+---
+# Reviewed 2026-10-19. amd64 only. No package scripts/binaries were executed.
+# Artifact SHA256 values match authenticated cached APT metadata on each host.
+# Sources, without redirects:
+# https://download.docker.com/linux/ubuntu/dists/noble/pool/stable/amd64/
+# https://download.docker.com/linux/debian/dists/bookworm/pool/stable/amd64/
+# Filenames: <package>_<version without epoch>_amd64.deb
+# control_sha256 hashes the decompressed control.tar, equivalent to
+# dpkg-deb --ctrl-tarfile. Reviewed all control metadata and executable scripts.
+# CE scripts use standard dh helpers, honor policy-rc.d for service actions,
+# reload AppArmor/systemd and maintain init/service links. CLI/extras have no
+# executable maintainer scripts. No unexpected downloads or secret reads found.
+# CE requires containerd.io >=2.1.5; installed 2.2.4 satisfies this dependency.
+# Cached resolver plan changes ONLY these existing CE/CLI/extras packages.
+# This review receipt does NOT authorize installation or restart on its own.
+docker_patch_reviewed_packages:
+  microservice_host:
+    docker-ce:
+      version: '5:29.9.1-1~ubuntu.24.04~noble'
+      sha256: '463a666215797c9f9ea7d0ad1751de5b2b3806a1b539a3550e16822ef34ccbfd'
+      control_sha256: '2dfb61144a18e43b1aa1d1652d1568fb80bcaf07f4236ff5c0765ed2ec0612a8'
+    docker-ce-cli:
+      version: '5:29.9.1-1~ubuntu.24.04~noble'
+      sha256: '961968342af4738eb5fb5fc03f9834106c1e454bd010d574cf1a6feae9905efc'
+      control_sha256: 'ee2a603360bad20905173c30de9f60c7f5ee7d548c348bfb85e1e7bbf0331606'
+    docker-ce-rootless-extras:
+      version: '5:29.9.1-1~ubuntu.24.04~noble'
+      sha256: 'd023824e4c5a1af5ea1bc6270f37229599d4aed09b5ac508f5e2dee32e13f7cc'
+      control_sha256: '0cc6c327d89c00684c52b4fccc99ac5d6424eefbdc5bc638aed9a55a3406b39c'
+  game_server:
+    docker-ce:
+      version: '5:29.9.1-1~debian.12~bookworm'
+      sha256: '040567cb82687a0439b1f4da0d4e121dcfef237e639ed2aaa3a99da2fb916650'
+      control_sha256: '95826954ca23987de334fc8df9e731285dbef329c69f831e4796b2b0c83b1c05'
+    docker-ce-cli:
+      version: '5:29.9.1-1~debian.12~bookworm'
+      sha256: 'e96643506288cde4ce60ecbf84ec5c88d0969e9e717452442c86e33273bbfced'
+      control_sha256: 'bb91c9d47920372424528df144f1835ddd577f070acff7c58e328a77b3171a1b'
+    docker-ce-rootless-extras:
+      version: '5:29.9.1-1~debian.12~bookworm'
+      sha256: '4e1f72a740d19ab33476ef430ba14afbc6426794de007c9d92b293cfb1b65789'
+      control_sha256: '4568eb595750c720e4df0317937c3c02658f9c1328c597005a11bb5bce4ddc9d'
