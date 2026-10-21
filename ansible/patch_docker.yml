@@ -1,41 +1,80 @@
 ---
-- name: Audit or explicitly patch existing Docker engines
-  hosts: all
-  gather_facts: false
+# Preview: ansible-playbook -i inventory.yml patch_docker.yml
+# Apply reviewed packages during a maintenance window:
+# ansible-playbook -i inventory.yml patch_docker.yml -e docker_patch_apply=true -e docker_patch_restart_approved=true
+# Uses existing APT repositories and metadata. Package hooks can restart services.
+- name: Preview or apply the Docker Engine security patch
+  hosts: workloads:!macos:!proxmox
+  become: true
+  gather_facts: true
   serial: 1
   any_errors_fatal: true
   vars:
     docker_patch_apply: false
     docker_patch_restart_approved: false
-    docker_patch_reviewed_packages: {}
+    docker_patch_version: '29.9.1'
+    docker_patch_packages:
+      - docker-ce
+      - docker-ce-cli
+      - docker-ce-rootless-extras
+
+  pre_tasks:
+    - name: Require Debian or Ubuntu
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] in ['Debian', 'Ubuntu']
+        fail_msg: This playbook patches existing Debian or Ubuntu Docker CE packages only.
+
+    - name: Read installed APT packages
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Require an existing Docker CE engine and CLI
+      ansible.builtin.assert:
+        that:
+          - "'docker-ce' in ansible_facts['packages']"
+          - "'docker-ce-cli' in ansible_facts['packages']"
+        fail_msg: Docker CE is not installed. This playbook does not install or migrate Docker.
+
+    - name: Require restart approval before applying updates
+      ansible.builtin.assert:
+        that:
+          - docker_patch_restart_approved | bool
+        fail_msg: Set docker_patch_restart_approved=true during an approved maintenance window.
+      when:
+        - docker_patch_apply | bool
+        - not ansible_check_mode
 
   tasks:
-    - name: Inspect local installation and enforce reviewed Docker CE patch policy
-      docker_security_patch:
-        apply: "{{ docker_patch_apply | bool }}"
-        restart_approved: "{{ docker_patch_restart_approved | bool }}"
-        reviewed_packages: "{{ docker_patch_reviewed_packages.get(inventory_hostname, {}) }}"
-      # No sudo on macOS, where Desktop or CLI-only installs are audit-only.
-      become: "{{ inventory_hostname not in groups.get('macos', []) }}"
+    - name: Preview or apply the exact Docker CE patch without removals or downgrades
+      ansible.builtin.apt:
+        name: >-
+          {{ docker_patch_packages | intersect(ansible_facts['packages'].keys() | list)
+             | map('regex_replace', '$', '=5:' ~ docker_patch_version ~ '-1~'
+               ~ (ansible_facts['distribution'] | lower) ~ '.'
+               ~ (ansible_facts['distribution_version'] if ansible_facts['distribution'] == 'Ubuntu'
+                  else ansible_facts['distribution_major_version']) ~ '~'
+               ~ ansible_facts['distribution_release']) | list }}
+        state: present
+        only_upgrade: true
+        allow_downgrade: false
+        fail_on_autoremove: true
+        force_apt_get: true
+        auto_install_module_deps: false
+        update_cache: false
+        lock_timeout: 300
+      check_mode: "{{ ansible_check_mode or not (docker_patch_apply | bool) }}"
       register: docker_patch_result
-      no_log: true
-      ignore_errors: true
 
-    - name: Report only installation and patch status
+    - name: Show the package transaction
       ansible.builtin.debug:
-        msg:
-          host: "{{ inventory_hostname }}"
-          os: "{{ docker_patch_result.os | default('unknown') }}"
-          method: "{{ docker_patch_result.method | default('unknown') }}"
-          status: "{{ docker_patch_result.status | default('inspection_failed') }}"
-          active: "{{ docker_patch_result.active | default(false) }}"
-          binary_version: "{{ docker_patch_result.binary_version | default('none') }}"
-          daemon_version: "{{ docker_patch_result.daemon_version | default('not_verified') }}"
-          packages: "{{ docker_patch_result.packages | default({}) }}"
-          plan: "{{ docker_patch_result.plan | default([]) }}"
-          blocker: "{{ docker_patch_result.msg | default('none') }}"
+        msg: "{{ docker_patch_result.stdout_lines | default(['Docker CE packages already match the target.']) }}"
 
-    - name: Stop rollout on unsupported installation or failed verification
-      ansible.builtin.fail:
-        msg: "Docker patch blocked on {{ inventory_hostname }}; see sanitized status above."
-      when: docker_patch_result is failed
+    - name: Restart Docker after applying the patch
+      ansible.builtin.systemd_service:
+        name: docker
+        state: restarted
+      when:
+        - docker_patch_apply | bool
+        - not ansible_check_mode
+        - docker_patch_result is changed
