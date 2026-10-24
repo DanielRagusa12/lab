@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{{ bot_launch_label | e }}</string>
+  <key>UserName</key>
+  <string>{{ ansible_facts['user_id'] | e }}</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>Umask</key>
+  <integer>63</integer>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/colima</string>
+    <string>--profile</string>
+    <string>{{ bot_colima_profile | e }}</string>
+    <string>start</string>
+    <string>--foreground</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>{{ ansible_facts['env']['HOME'] | e }}</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>{{ ansible_facts['env']['HOME'] | e }}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>ExitTimeOut</key>
+  <integer>120</integer>
+  <key>StandardOutPath</key>
+  <string>{{ ansible_facts['env']['HOME'] | e }}/Library/Logs/music-bot/colima.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{ ansible_facts['env']['HOME'] | e }}/Library/Logs/music-bot/colima.log</string>
+</dict>
+</plist>

@@ -1,47 +1,348 @@
 ---
-- name: Production Deployment - Discord Music Bot
-  hosts: microservice_host:!macos
-  become: true
+- name: Deploy the Discord music bot on Apple Silicon with Colima
+  hosts: mac_mini
+  become: false
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/vault.yml"
+  vars:
+    ansible_python_interpreter: /opt/homebrew/bin/python3.13
+    ansible_become_password: "{{ vault_mac_mini_become_password }}"
+    remote_bot_path: "{{ ansible_facts['env']['HOME'] }}/music-bot"
+    local_code_path: "{{ local_bot_root | default(lookup('env', 'HOME') ~ '/Projects/mr-play-your-song') }}"
+    bot_env_file: "{{ local_code_path }}/.env"
+    bot_install_runtime: false
+    bot_start: true
+    bot_brew_owner: daniel
+    bot_colima_profile: music-bot
+    bot_docker_context: "colima-{{ bot_colima_profile }}"
+    bot_compose_project: mr-play-your-song
+    bot_launch_label: net.homelab.music-bot.colima
+    bot_runtime_packages:
+      lima:
+        version: '2.2.1'
+        sha256: 45b60082bc96dca12d076e75b9b0651edc3df86861de855d724ffa47fd2173ea
+        formula_sha256: 3b19c08797b01f1878bc95462fcf5f0f968fe5061206606d9529a62ad214a9ec
+      colima:
+        version: '0.10.3'
+        sha256: ca04c8325d83d475dad786b1e946b1aa7f2c9e19d81e1121ef29ffa431e65d87
+        formula_sha256: 086756737e0ef57861ca579e0a1516adfc4046ee58a8d74b3b86a410d4ba0020
+      docker:
+        version: '29.9.2'
+        sha256: c7cf37be25bcdd4832a6a1c206e82be39f377167aa37ad052c61ab508aa2217c
+        formula_sha256: dc3510ef7d5cc047b195b325669b6cf029ff2499c6ae96c08b2a43cd62f0d539
+      docker-compose:
+        version: '5.6.1'
+        sha256: 58245ee987c2697ecfa0952afe8ef9597c26e998a8d5158fad023cc46ee55f78
+        formula_sha256: ec6fd599cea5a6244c551b71037288349d02bd5237645780483443aa5d384ef0
+      docker-buildx:
+        version: '0.38.1'
+        sha256: b7a1b0ac94fc9c90d0281e8092f5848fabcd56017b9ea21611574d3c06c13437
+        formula_sha256: 58b4026f0dba903d4d9a97a55e8193112cc5bb85bca81275cc33024afa4b3e36
+    bot_brew_environment:
+      HOMEBREW_CACHE: "/Users/{{ bot_brew_owner }}/Library/Caches/music-bot-homebrew"
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_ANALYTICS: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      HOMEBREW_NO_INSTALL_UPGRADE: '1'
+    bot_command_environment:
+      PATH: /opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+      DOCKER_CONFIG: "{{ ansible_facts['env']['HOME'] }}/.docker"
 
   pre_tasks:
-    - name: Load secret variables
-      ansible.builtin.include_vars: "{{ playbook_dir }}/vault.yml"
-      no_log: true
+    - name: Require the intended Apple Silicon deployment account
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['system'] == 'Darwin'
+          - ansible_facts['architecture'] == 'arm64'
+          - ansible_facts['user_id'] == 'macos'
+        fail_msg: This playbook targets the macos account on the Apple Silicon Mini only.
 
-  vars:
-    remote_bot_path: "/opt/music-bot"
-    local_code_path: "{{ local_bot_root }}"
+    - name: Require the local application source and environment before touching the host
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.fileglob', local_code_path ~ '/Dockerfile', wantlist=True) | length == 1
+          - lookup('ansible.builtin.fileglob', bot_env_file, wantlist=True) | length == 1
+        fail_msg: Set local_bot_root to the absolute application checkout containing Dockerfile and .env.
 
   tasks:
-    - name: Ship code from local machine to VM
+    - name: Install the reviewed runtime bottles when explicitly requested
+      when: bot_install_runtime | bool
+      become: true
+      become_user: "{{ bot_brew_owner }}"
+      environment: "{{ bot_brew_environment }}"
+      block:
+        - name: Inspect the current Homebrew core metadata before installing
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/brew
+              - info
+              - --json=v2
+              - homebrew/core/lima
+              - homebrew/core/colima
+              - homebrew/core/docker
+              - homebrew/core/docker-compose
+              - homebrew/core/docker-buildx
+          register: bot_brew_metadata
+          changed_when: false
+
+        - name: Reject runtime versions or bottles that have not been reviewed
+          ansible.builtin.assert:
+            that:
+              - item.tap == 'homebrew/core'
+              - item.versions.stable == bot_runtime_packages[item.name].version
+              - item.bottle.stable.files.arm64_golden_gate.sha256 == bot_runtime_packages[item.name].sha256
+              - item.ruby_source_checksum.sha256 == bot_runtime_packages[item.name].formula_sha256
+            quiet: true
+            fail_msg: Homebrew metadata changed. Review the new formula and bottle before updating the allowlist.
+          loop: "{{ (bot_brew_metadata.stdout | from_json).formulae }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Install only bottles from the reviewed core formulae
+          ansible.builtin.command:
+            argv:
+              - /opt/homebrew/bin/brew
+              - install
+              - --force-bottle
+              - homebrew/core/lima
+              - homebrew/core/colima
+              - homebrew/core/docker
+              - homebrew/core/docker-compose
+              - homebrew/core/docker-buildx
+          register: bot_brew_install
+          changed_when: "'Pouring' in bot_brew_install.stdout"
+
+    - name: Check the installed runtime binaries
+      ansible.builtin.command:
+        argv: ["/opt/homebrew/bin/{{ item.name }}", "{{ item.argument }}"]
+      loop:
+        - {name: colima, argument: version}
+        - {name: docker, argument: --version}
+        - {name: docker-compose, argument: version}
+        - {name: docker-buildx, argument: version}
+      environment: "{{ bot_command_environment }}"
+      changed_when: false
+
+    - name: Create private deployment and runtime directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0700'
+      loop:
+        - "{{ remote_bot_path }}"
+        - "{{ ansible_facts['env']['HOME'] }}/.colima/{{ bot_colima_profile }}"
+        - "{{ ansible_facts['env']['HOME'] }}/.docker/cli-plugins"
+        - "{{ ansible_facts['env']['HOME'] }}/Library/Logs/music-bot"
+
+    - name: Register Compose and Buildx for this user without replacing Docker configuration
+      ansible.builtin.file:
+        src: "/opt/homebrew/bin/docker-{{ item }}"
+        dest: "{{ ansible_facts['env']['HOME'] }}/.docker/cli-plugins/docker-{{ item }}"
+        state: link
+      loop: [compose, buildx]
+
+    - name: Seed the dedicated Colima VM configuration without overwriting runtime defaults
+      ansible.builtin.copy:
+        force: false
+        dest: "{{ ansible_facts['env']['HOME'] }}/.colima/{{ bot_colima_profile }}/colima.yaml"
+        mode: '0600'
+        content: |
+          cpu: 2
+          memory: 4
+          disk: 40
+          arch: aarch64
+          runtime: docker
+          vmType: vz
+          mountType: virtiofs
+          autoActivate: false
+          forwardAgent: false
+          sshConfig: false
+          rosetta: false
+          binfmt: false
+          kubernetes:
+            enabled: false
+          network:
+            address: false
+          mounts:
+            - location: {{ remote_bot_path | to_json }}
+              writable: false
+
+    - name: Install the system-boot Colima daemon running as the deployment user
+      become: true
+      ansible.builtin.template:
+        src: music-bot-colima.plist.j2
+        dest: "/Library/LaunchDaemons/{{ bot_launch_label }}.plist"
+        owner: root
+        group: wheel
+        mode: '0644'
+        validate: /usr/bin/plutil -lint %s
+      register: bot_launch_daemon
+
+    - name: Check whether the system Colima daemon is loaded
+      become: true
+      ansible.builtin.command:
+        argv: [launchctl, print, "system/{{ bot_launch_label }}"]
+      register: bot_system_launch_status
+      failed_when: false
+      changed_when: false
+
+    - name: Check for the superseded login-based Colima agent
+      ansible.builtin.command:
+        argv: [launchctl, print, "gui/{{ ansible_facts['user_uid'] }}/{{ bot_launch_label }}"]
+      register: bot_gui_launch_status
+      failed_when: false
+      changed_when: false
+
+    - name: Stop the superseded login-based agent and its dedicated VM gracefully
+      ansible.builtin.command:
+        argv: [launchctl, bootout, "gui/{{ ansible_facts['user_uid'] }}/{{ bot_launch_label }}"]
+      when: bot_gui_launch_status.rc == 0
+      changed_when: true
+
+    - name: Stop the loaded system daemon before applying a changed definition
+      become: true
+      ansible.builtin.command:
+        argv: [launchctl, bootout, "system/{{ bot_launch_label }}"]
+      when: bot_system_launch_status.rc == 0 and bot_launch_daemon is changed
+      changed_when: true
+
+    - name: Wait for the previous Colima supervisor to finish shutting down its VM
+      ansible.builtin.command:
+        argv: [/opt/homebrew/bin/colima, --profile, "{{ bot_colima_profile }}", status]
+      environment: "{{ bot_command_environment }}"
+      register: bot_previous_runtime
+      until: bot_previous_runtime.rc != 0
+      retries: 60
+      delay: 2
+      changed_when: false
+      failed_when: false
+      when: >-
+        bot_gui_launch_status.rc == 0 or
+        (bot_system_launch_status.rc == 0 and bot_launch_daemon is changed)
+
+    - name: Require the prior supervisor to release the dedicated VM before proceeding
+      ansible.builtin.assert:
+        that: [bot_previous_runtime.rc != 0]
+        fail_msg: The previous supervisor did not stop its VM. Inspect Colima logs before starting another supervisor.
+      when: >-
+        bot_gui_launch_status.rc == 0 or
+        (bot_system_launch_status.rc == 0 and bot_launch_daemon is changed)
+
+    - name: Check for an independently started VM before the initial daemon bootstrap
+      ansible.builtin.command:
+        argv: [/opt/homebrew/bin/colima, --profile, "{{ bot_colima_profile }}", status]
+      environment: "{{ bot_command_environment }}"
+      register: bot_unmanaged_runtime
+      changed_when: false
+      failed_when: false
+      when: bot_gui_launch_status.rc != 0 and bot_system_launch_status.rc != 0
+
+    - name: Reject attaching the foreground daemon to an independently running VM
+      ansible.builtin.assert:
+        that: [bot_unmanaged_runtime.rc != 0]
+        fail_msg: Stop the independently running music-bot Colima profile gracefully, then rerun this playbook.
+      when: bot_gui_launch_status.rc != 0 and bot_system_launch_status.rc != 0
+
+    - name: Enable the system daemon independently of GUI login
+      become: true
+      ansible.builtin.command:
+        argv: [launchctl, enable, "system/{{ bot_launch_label }}"]
+      changed_when: false
+
+    - name: Load the system-boot Colima daemon
+      become: true
+      ansible.builtin.command:
+        argv:
+          - launchctl
+          - bootstrap
+          - system
+          - "/Library/LaunchDaemons/{{ bot_launch_label }}.plist"
+      when: bot_system_launch_status.rc != 0 or bot_launch_daemon is changed
+      changed_when: true
+
+    - name: Wait for the dedicated Docker context to become ready
+      ansible.builtin.command:
+        argv: [/opt/homebrew/bin/docker, --context, "{{ bot_docker_context }}", info]
+      environment: "{{ bot_command_environment }}"
+      register: bot_docker_ready
+      until: bot_docker_ready.rc == 0
+      retries: 90
+      delay: 5
+      changed_when: false
+
+    - name: Remove the superseded user-login startup file after the daemon is ready
+      ansible.builtin.file:
+        path: "{{ ansible_facts['env']['HOME'] }}/Library/LaunchAgents/{{ bot_launch_label }}.plist"
+        state: absent
+
+    - name: Synchronize the application without secrets or host dependencies
       ansible.posix.synchronize:
-        src: "{{ local_code_path }}"
-        dest: "{{ remote_bot_path }}"
-        delete: true
+        src: "{{ local_code_path }}/"
+        dest: "{{ remote_bot_path }}/"
         recursive: true
+        delete: false
+        verify_host: true
         rsync_opts:
-          - "--exclude=.git"
-          - "--exclude=.env"
-          - "--exclude=*.yml"
+          - --chmod=Du=rwx,Dgo=
+          - --exclude=.git
+          - --exclude=.env
+          - --exclude=.env.*
+          - --exclude=node_modules
+          - --exclude=.pi
 
-    - name: Build the Docker image
-      community.docker.docker_image:
-        name: music-bot-prod
-        build:
-          path: "{{ remote_bot_path }}"
-        source: build
-        state: present
-        force_source: true
-
-    - name: Launch/Restart the container
-      community.docker.docker_container:
-        name: discord-music-bot
-        image: music-bot-prod:latest
-        state: started
-        restart: true
-        restart_policy: unless-stopped
-        env:
-          DISCORD_BOT_TOKEN: "{{ discord_token }}"
-        devices:
-          - "/dev/snd:/dev/snd"
+    - name: Copy the runtime environment separately
+      ansible.builtin.copy:
+        src: "{{ bot_env_file }}"
+        dest: "{{ remote_bot_path }}/.env"
+        mode: '0600'
       no_log: true
+
+    - name: Build and test the native ARM64 application image
+      ansible.builtin.command:
+        argv:
+          - /opt/homebrew/bin/docker
+          - --context
+          - "{{ bot_docker_context }}"
+          - compose
+          - --project-name
+          - "{{ bot_compose_project }}"
+          - build
+          - bot
+        chdir: "{{ remote_bot_path }}"
+      environment: "{{ bot_command_environment }}"
+      changed_when: true
+
+    - name: Start Redis first and replace the bot with the newly built image
+      ansible.builtin.command:
+        argv: >-
+          {{ ['/opt/homebrew/bin/docker', '--context', bot_docker_context,
+              'compose', '--project-name', bot_compose_project, 'up', '-d',
+              '--no-build', '--wait', '--wait-timeout', '90']
+             + item.flags + [item.service] }}
+        chdir: "{{ remote_bot_path }}"
+      loop:
+        - {service: redis, flags: []}
+        - {service: bot, flags: [--no-deps, --force-recreate]}
+      loop_control:
+        label: "{{ item.service }}"
+      environment: "{{ bot_command_environment }}"
+      when: bot_start | bool
+      changed_when: true
+
+    - name: Verify the dashboard health endpoint on the Mini
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8000/health
+        return_content: true
+      register: bot_health
+      until: bot_health.status == 200 and bot_health.json.status == 'ok'
+      retries: 12
+      delay: 5
+      when: bot_start | bool
+
+    - name: Report the startup behavior
+      ansible.builtin.debug:
+        msg: >-
+          Dedicated context {{ bot_docker_context }} is ready. A system LaunchDaemon starts Colima
+          as macos at boot without a GUI login. Existing containers use their Compose restart policies.
+          Auto-login and FileVault settings are unchanged; encrypted boot volumes still require unlocking.

@@ -86,7 +86,7 @@ The `ansible/` directory contains playbooks for post-provisioning setup and serv
 - `deploy_portainer_agent.yml` deploys the Portainer agent on the game server.
 - `install_node_exporter.yml` installs node exporter and verifies local metrics endpoints.
 - `install_cadvisor.yml` runs cAdvisor containers for Docker visibility.
-- `deploy_discord_bot.yml` builds and deploys a Discord music bot container.
+- `deploy_discord_bot.yml` builds and deploys the Discord music bot and Redis on the Apple Silicon Mac Mini using a dedicated Colima profile. See [deployment and rollback instructions](ansible/discord-bot.md).
 - `deploy_proxmox_network_watchdog.yml` installs a systemd watchdog for sustained host network failures.
 - `mc/minecraft-deploy.yml` deploys and maintains the Minecraft server stack.
 
