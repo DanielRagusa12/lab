@@ -65,6 +65,13 @@
           - lookup('ansible.builtin.fileglob', bot_env_file, wantlist=True) | length == 1
         fail_msg: Set local_bot_root to the absolute application checkout containing Dockerfile and .env.
 
+    - name: Require the shared Lavalink secret in the private runtime environment
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.file', bot_env_file) is search('(?m)^LAVALINK_PASSWORD=.+$')
+        fail_msg: Set a generated LAVALINK_PASSWORD in the private application .env before deployment.
+      no_log: true
+
   tasks:
     - name: Install the reviewed runtime bottles when explicitly requested
       when: bot_install_runtime | bool
@@ -298,7 +305,7 @@
         mode: '0600'
       no_log: true
 
-    - name: Build and test the native ARM64 application image
+    - name: Build the native ARM64 application and private Lavalink images
       ansible.builtin.command:
         argv:
           - /opt/homebrew/bin/docker
@@ -309,20 +316,22 @@
           - "{{ bot_compose_project }}"
           - build
           - bot
+          - lavalink
         chdir: "{{ remote_bot_path }}"
       environment: "{{ bot_command_environment }}"
       changed_when: true
 
-    - name: Start Redis first and replace the bot with the newly built image
+    - name: Start Redis and Lavalink first, then replace the bot
       ansible.builtin.command:
         argv: >-
           {{ ['/opt/homebrew/bin/docker', '--context', bot_docker_context,
               'compose', '--project-name', bot_compose_project, 'up', '-d',
-              '--no-build', '--wait', '--wait-timeout', '90']
+              '--no-build', '--wait', '--wait-timeout', '180']
              + item.flags + [item.service] }}
         chdir: "{{ remote_bot_path }}"
       loop:
         - {service: redis, flags: []}
+        - {service: lavalink, flags: [--no-deps, --force-recreate]}
         - {service: bot, flags: [--no-deps, --force-recreate]}
       loop_control:
         label: "{{ item.service }}"
