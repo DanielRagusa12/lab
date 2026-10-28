@@ -1,0 +1,132 @@
+---
+# Run from ansible/; preview refreshes APT metadata but does not install or restart.
+# Preview: ansible-playbook -i inventory.yml patch_cloudflared.yml
+# Apply only after reviewing the package and its maintainer scripts:
+# ansible-playbook -i inventory.yml patch_cloudflared.yml -e cloudflared_patch_apply=true -e cloudflared_patch_reviewed=true -e cloudflared_patch_restart_approved=true
+# A single connector will interrupt traffic. Package hooks may restart it too.
+- name: Preview or apply the cloudflared security patch
+  hosts: cloudflare_tunnel:!proxmox:!macos
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    cloudflared_patch_apply: false
+    cloudflared_patch_reviewed: false
+    cloudflared_patch_restart_approved: false
+    cloudflared_patch_version: '2026.10.5'
+
+  pre_tasks:
+    - name: Require Debian or Ubuntu and a fixed cloudflared version
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] in ['Debian', 'Ubuntu']
+          - cloudflared_patch_version is version('2026.10.2', '>=', version_type='loose')
+        fail_msg: This playbook requires Debian or Ubuntu and cloudflared 2026.10.2 or later.
+
+    - name: Read installed APT packages
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Require an existing cloudflared package
+      ansible.builtin.assert:
+        that:
+          - "'cloudflared' in ansible_facts['packages']"
+        fail_msg: Use deploy_cloudflare_tunnel.yml for initial installation.
+
+    - name: Require package review and restart approval before applying
+      ansible.builtin.assert:
+        that:
+          - cloudflared_patch_reviewed | bool
+          - cloudflared_patch_restart_approved | bool
+        fail_msg: >-
+          Review the exact package, source and maintainer scripts first, then set
+          cloudflared_patch_reviewed=true and cloudflared_patch_restart_approved=true.
+          A single connector will interrupt traffic during the restart.
+      when:
+        - cloudflared_patch_apply | bool
+        - not ansible_check_mode
+
+  tasks:
+    - name: Refresh APT metadata from existing repositories
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
+        auto_install_module_deps: false
+        lock_timeout: 300
+
+    - name: Preview or apply the exact patch without removals or downgrades
+      ansible.builtin.apt:
+        name: "cloudflared={{ cloudflared_patch_version }}"
+        state: present
+        only_upgrade: true
+        allow_downgrade: false
+        fail_on_autoremove: true
+        force_apt_get: true
+        auto_install_module_deps: false
+        update_cache: false
+        lock_timeout: 300
+      check_mode: "{{ ansible_check_mode or not (cloudflared_patch_apply | bool) }}"
+      register: cloudflared_patch_result
+      when: ansible_facts['packages']['cloudflared'][0]['version'] is version(cloudflared_patch_version, '<', version_type='loose')
+
+    - name: Show the package transaction
+      ansible.builtin.debug:
+        msg: "{{ cloudflared_patch_result.stdout_lines | default(['Installed package already meets the target version.']) }}"
+
+    - name: Restart and verify the patched connector
+      when:
+        - cloudflared_patch_apply | bool
+        - not ansible_check_mode
+      block:
+        - name: Restart cloudflared when the package changed
+          ansible.builtin.systemd_service:
+            name: cloudflared
+            state: restarted
+            daemon_reload: true
+          when: cloudflared_patch_result is changed
+
+        - name: Verify the installed binary version
+          ansible.builtin.command:
+            argv: [cloudflared, --version]
+          changed_when: false
+          register: cloudflared_patch_binary
+          failed_when: >-
+            cloudflared_patch_binary.rc != 0 or
+            not ((cloudflared_patch_binary.stdout.split())[2]
+                 is version(cloudflared_patch_version, '>=', version_type='loose'))
+
+        - name: Read the current service start time
+          ansible.builtin.command:
+            argv: [systemctl, show, cloudflared, --property=ExecMainStartTimestamp, --value]
+          changed_when: false
+          register: cloudflared_patch_started
+          failed_when: cloudflared_patch_started.rc != 0 or cloudflared_patch_started.stdout | length == 0
+
+        - name: Wait for a registered connection from the current service run
+          ansible.builtin.command:
+            argv:
+              - journalctl
+              - --unit=cloudflared
+              - "--since={{ cloudflared_patch_started.stdout }}"
+              - --output=cat
+              - --no-pager
+          changed_when: false
+          register: cloudflared_patch_connections
+          until: >-
+            cloudflared_patch_connections.rc == 0 and
+            'Registered tunnel connection' in cloudflared_patch_connections.stdout
+          retries: 12
+          delay: 5
+          no_log: true
+
+        - name: Verify the service remains active
+          ansible.builtin.command:
+            argv: [systemctl, is-active, cloudflared]
+          changed_when: false
+          register: cloudflared_patch_active
+          failed_when: cloudflared_patch_active.rc != 0 or cloudflared_patch_active.stdout != 'active'
+
+        - name: Report the patched connector
+          ansible.builtin.debug:
+            msg: "{{ cloudflared_patch_binary.stdout }}; service active; Cloudflare connection registered."
